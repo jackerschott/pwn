@@ -1,0 +1,32 @@
+#ifndef TYPES_H
+#define TYPES_H
+
+#define NUM_ROW_FIELDS 8
+
+typedef struct{
+	int i;
+	int j;
+} field;
+
+typedef enum {
+	PIECE_NONE,
+	PIECE_WHITE_KING,
+	PIECE_BLACK_KING,
+	PIECE_WHITE_QUEEN,
+	PIECE_BLACK_QUEEN,
+	PIECE_WHITE_ROOK,
+	PIECE_BLACK_ROOK,
+	PIECE_WHITE_BISHOP,
+	PIECE_BLACK_BISHOP,
+	PIECE_WHITE_KNIGHT,
+	PIECE_BLACK_KNIGHT,
+	PIECE_WHITE_PAWN,
+	PIECE_BLACK_PAWN,
+} piece;
+
+typedef enum  {
+	COLOR_WHITE,
+	COLOR_BLACK,
+} color;
+
+#endif /* TYPES_H */
