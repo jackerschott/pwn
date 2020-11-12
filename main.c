@@ -11,34 +11,159 @@ Display *dpy;
 Window winmain;
 cairo_surface_t *surface;
 
-int board[NUM_ROW_FIELDS][NUM_ROW_FIELDS];
+#define FIGURE(p) ((p) / 2 - 1)
+#define PALETTE(c) (c)
+#define XTOI(x) ((int)(((x) - board_domain.xorig) / (board_domain.size / NF)))
+#define YTOJ(y) (NF - (int)(((y) - board_domain.yorig) / (board_domain.size / NF)) - 1)
+#define ITOX(i) (board_domain.xorig + (i) * board_domain.fieldsize)
+#define JTOY(j) (board_domain.yorig + (NF - (j) - 1) * board_domain.fieldsize)
 
-void on_expose(XExposeEvent *e) {
-	cairo_xlib_surface_set_size(surface, e->width, e->height);
+const int player_color = COLOR_WHITE;
+
+struct {
+	double xorig, yorig;
+	double size;
+	double fieldsize;
+} board_domain;
+
+int itouched = -1;
+int jtouched = -1;
+
+static void select_field(int i, int j)
+{
+	draw_record();
+
+	double fx = ITOX(i);
+	double fy = JTOY(j);
+	draw_field(fx, fy, board_domain.fieldsize, (i + j) % 2, 1);
+
+	int piece = game_get_piece(i, j);
+	if (piece) {
+		int color = game_get_color(i, j);
+		draw_piece(fx, fy, board_domain.fieldsize, FIGURE(piece), PALETTE(color));
+	}
+
+	draw_commit();
+
+	itouched = i;
+	jtouched = j;
+}
+static void unselect_field(int i, int j)
+{
+	draw_record();
+
+	double fx = ITOX(i);
+	double fy = JTOY(j);
+	draw_field(fx, fy, board_domain.fieldsize, (i + j) % 2, 0);
+
+	int piece = game_get_piece(i, j);
+	if (piece) {
+		int color = game_get_color(i, j);
+		draw_piece(fx, fy, board_domain.fieldsize, FIGURE(piece), PALETTE(color));
+	}
+
+	draw_commit();
+
+	itouched = -1;
+	jtouched = -1;
+}
+static void show_move(int ifrom, int jfrom, int ito, int jto, int updates[][2])
+{
+	double fx, fy;
 
 	draw_record();
-	double d = (e->width - e->height) / 2;
-	if (d > 0) {
-		draw_game(board, d, 0, e->height);
-	} else {
-		draw_game(board, 0, -d, e->width);
+	for (int k = 0; k < NUM_UPDATES_MAX && updates[k][0] != -1; ++k) {
+		int i = updates[k][0];
+		int j = updates[k][1];
+
+		double fx = ITOX(i);
+		double fy = JTOY(j);
+		draw_field(fx, fy, board_domain.fieldsize, (i + j) % 2, 0);
+
+		int piece = game_get_piece(i, j);
+		if (piece & PIECEMASK) {
+			int color = game_get_color(i, j);
+			draw_piece(fx, fy, board_domain.fieldsize, FIGURE(piece), PALETTE(color));
+		}
 	}
 	draw_commit();
 }
 
-void on_motion(XMotionEvent *e)
+static void move(int ifrom, int jfrom, int ito, int jto)
 {
+	if (game_move(ifrom, jfrom, ito, jto))
+		return;
 
+	int updates[NUM_UPDATES_MAX][2];
+	game_get_updates(updates);
+	show_move(ifrom, jfrom, ito, jto, updates);
+
+	if (game_is_checkmate()) {
+		printf("checkmate!\n");
+	}
+	if (game_is_stalemate()) {
+		printf("stalemate!\n");
+	}
+}
+
+void on_configure(XConfigureEvent *e)
+{
+	cairo_xlib_surface_set_size(surface, e->width, e->height);
+
+	int d = (e->width - e->height) / 2;
+	if (d > 0) {
+		board_domain.xorig = d;
+		board_domain.yorig = 0;
+		board_domain.size = e->height;
+		board_domain.fieldsize = e->height / NF;
+	} else {
+		board_domain.xorig = d;
+		board_domain.yorig = 0;
+		board_domain.size = e->height;
+		board_domain.fieldsize = e->height / NF;
+	}
+
+	draw_record();
+	for (int j = 0; j < NF; ++j) {
+		for (int i = 0; i < NF; ++i) {
+			double fx = ITOX(i);
+			double fy = JTOY(j);
+			draw_field(fx, fy, board_domain.fieldsize, (i + j) % 2, 0);
+
+			int piece = game_get_piece(i, j);
+			if (piece & PIECEMASK) {
+				int color = game_get_color(i, j);
+				draw_piece(fx, fy, board_domain.fieldsize,
+						FIGURE(piece), PALETTE(color));
+			}
+		}
+	}
+	draw_commit();
 }
 
 void on_button_press(XButtonEvent *e)
 {
-
+	int i = XTOI(e->x);
+	int j = YTOJ(e->y);
+	if (itouched != -1 && jtouched != -1) {
+		move(itouched, jtouched, i, j);
+		unselect_field(i, j);
+	} else if (game_is_movable_piece(i, j)) {
+		select_field(i, j);
+	}
 }
 
 void on_button_release(XButtonEvent *e)
 {
+	if (itouched == -1 && jtouched == -1)
+		return;
 
+	int i = XTOI(e->x);
+	int j = YTOJ(e->y);
+	if (itouched != i || jtouched != j) {
+		move(itouched, jtouched, i, j);
+		unselect_field(itouched, jtouched);
+	}
 }
 
 void setup(void)
@@ -50,13 +175,20 @@ void setup(void)
 	unsigned int winwidth = 800;
 	unsigned int winheight = 800;
 	winmain = XCreateSimpleWindow(dpy, root, 0, 0, winwidth, winheight, 0, 0, 0);
-	XSelectInput(dpy, winmain, ExposureMask | KeyPressMask);
+
+	long mask = ExposureMask | KeyPressMask | PointerMotionMask
+		| ButtonPressMask | ButtonReleaseMask | StructureNotifyMask;
+	XSelectInput(dpy, winmain, mask);
 	XMapWindow(dpy, winmain);
 
 	surface = cairo_xlib_surface_create(dpy, winmain, vis, winwidth, winheight);
 	draw_init_context(surface);
 
-	game_init_board(board, COLOR_WHITE);
+	board_domain.xorig = 0;
+	board_domain.yorig = 0;
+	board_domain.size = winwidth;
+
+	game_init_board(player_color);
 }
 
 void cleanup(void)
@@ -74,15 +206,12 @@ void run(void)
 	XEvent ev;
 	while (!quit) {
 		XNextEvent(dpy, &ev);
-
-		if (ev.type == Expose) {
-			on_expose(&ev.xexpose);
-		} else if (ev.type == MotionNotify) {
-			on_motion(&ev.xmotion);
+		if (ev.type == ConfigureNotify) {
+			on_configure(&ev.xconfigure);
 		} else if (ev.type == ButtonPress) {
 			on_button_press(&ev.xbutton);
 		} else if (ev.type == ButtonRelease) {
-
+			on_button_release(&ev.xbutton);
 		}
 	}
 }
