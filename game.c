@@ -1,11 +1,16 @@
+#include <ctype.h>
+#include <fcntl.h>
 #include <stdlib.h>
-// debug
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <cairo/cairo.h>
 
 #include "draw.h"
+#include "util.h"
+
 #include "game.h"
 
 #define ATTR_CAN_CASTLE 		16
@@ -23,10 +28,22 @@
 
 #define OPP_COLOR(c) ((!(c)) & COLORMASK)
 #define PIECE_IDX(p) ((p) / 2 - 1)
-
-// debug
+#define PIECE_BY_IDX(i) (2 * (i) + 2)
 #define COL_CHAR(i) ('a' + i)
-#define ROW_CHAR(j) ('1' + (NF - j - 1))
+#define ROW_CHAR(j) ('1' + j)
+
+#define PIECENAME_BUF_SIZE 16
+
+struct move_info {
+	int p;
+	int ifrom, jfrom;
+	int ito, jto;
+	int taken;
+	int hints;
+	move_info *prev;
+	move_info *next;
+};
+
 const char *piece_names[] = {
 	"king",
 	"queen",
@@ -43,28 +60,45 @@ const char *piece_symbols[] = {
 	"N",
 	"",
 };
-static void print_move(const char *fmt, int ifrom, int jfrom, int ito, int jto, int piece) {
-	char s[7];
-	char field[3] = { 0 };
-	field[0] = COL_CHAR(ifrom);
-	field[1] = ROW_CHAR(jfrom);
-	snprintf(s, 7, "%s%s-", piece_symbols[PIECE_IDX(piece)], field);
-
-	field[0] = COL_CHAR(ito);
-	field[1] = ROW_CHAR(jto);
-	snprintf(s + strlen(s), 3, "%s", field);
-	printf(fmt, s);
-}
-
-struct move_info {
-	int p;
-	int ifrom, jfrom;
-	int ito, jto;
-	int taken;
-	int hints;
-	move_info *prev;
-	move_info *next;
+const char *hintstrs[] = {
+	"HINT_CASTLE",
+	"HINT_DEL_ATTR_CAN_CASTLE",
+	"HINT_PROMOTION",
+	"HINT_EN_PASSANT",
+	"HINT_ADD_ATTR_TAKEABLE_EN_PASSANT",
 };
+
+const char *promotion_prompt_cmd[] = { "dmenu", "-p", "promote to:" };
+
+static void print_hints(int hints)
+{
+	for (int i = 0; i < 5; ++i) {
+		if (hints & (1 << i)) {
+			printf("%s | ", hintstrs[i]);
+		}
+	}
+}
+static void print_move(move_info *m)
+{
+	char fieldfrom[3] = {0};
+	char fieldto[3] = {0};
+	fieldfrom[0] = COL_CHAR(m->ifrom);
+	fieldfrom[1] = ROW_CHAR(m->jfrom);
+	fieldto[0] = COL_CHAR(m->ito);
+	fieldto[1] = ROW_CHAR(m->jto);
+
+	printf("fields: %s%s-%s\n", piece_symbols[PIECE_IDX(m->p)], fieldfrom, fieldto);
+	//printf("fields: %s%i%i-%i%i\n", piece_symbols[PIECE_IDX(m->p)], m->ifrom, m->jfrom, m->ito, m->jto);
+
+	printf("taken: ");
+	if ((m->taken & PIECEMASK) != PIECE_NONE)
+		printf("%s", piece_names[PIECE_IDX(m->taken & PIECEMASK)]);
+	printf("\n");
+
+	printf("hints: ");
+	print_hints(m->hints);
+	printf("\n\n");
+}
 
 static int is_possible_king_move(int ifrom, int jfrom, int ito, int jto, int *flags);
 static int is_possible_queen_move(int ifrom, int jfrom, int ito, int jto, int *flags);
@@ -72,6 +106,8 @@ static int is_possible_rook_move(int ifrom, int jfrom, int ito, int jto, int *fl
 static int is_possible_bishop_move(int ifrom, int jfrom, int ito, int jto, int *flags);
 static int is_possible_knight_move(int ifrom, int jfrom, int ito, int jto, int *flags);
 static int is_possible_pawn_move(int ifrom, int jfrom, int ito, int jto, int *flags);
+
+static int is_king_in_check(int c, int iking, int jking);
 
 int (*is_possible_move[NUM_PIECES])(int, int, int, int, int *) = {
 	is_possible_king_move,
@@ -103,7 +139,7 @@ static int is_possible_king_move(int ifrom, int jfrom, int ito, int jto, int *hi
 
 	if (abs(ito - ifrom) <= 1 && abs(jto - jfrom) <= 1) {
 		return 1;
-	} else if (board[ito][jto] & ATTR_CAN_CASTLE && (ito == 2 || ito == NF - 2)) {
+	} else if (board[ifrom][jfrom] & ATTR_CAN_CASTLE && (ito == 2 || ito == NF - 2)) {
 		if (color == COLOR_WHITE && jto != 0)
 			return 0;
 		if (color == COLOR_BLACK && jto != NF - 1)
@@ -114,9 +150,12 @@ static int is_possible_king_move(int ifrom, int jfrom, int ito, int jto, int *hi
 		if (!(board[irook][jto] & (color | PIECE_ROOK | ATTR_CAN_CASTLE)))
 			return 0;
 		for (int k = 1; k < abs(irook - ifrom); ++k) {
-			if ((board[ito + k * step][jto] & PIECEMASK) != PIECE_NONE)
+			if ((board[ifrom + k * step][jto] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
+
+		if (is_king_in_check(color, ifrom, jfrom))
+			return 0;
 
 		if (hints)
 			*hints |= HINT_CASTLE;
@@ -154,7 +193,7 @@ static int is_possible_queen_move(int ifrom, int jfrom, int ito, int jto, int *h
 		}
 		return 1;
 	} else if (dj == 0) { /* like rook, horizontally */
-		for (int i = MIN(jfrom, jto) + 1; i < MAX(jfrom, jto); ++i) {
+		for (int i = MIN(ifrom, ito) + 1; i < MAX(ifrom, ito); ++i) {
 			if ((board[i][jfrom] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
@@ -422,7 +461,8 @@ static int is_king_in_check(int c, int iking, int jking)
 	for (int j = 0; j < NF; ++j) {
 		for (int i = 0; i < NF; ++i) {
 			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & COLORMASK) == c)
+					|| (board[i][j] & COLORMASK) == c
+					|| (board[i][j] & PIECEMASK) == PIECE_KING)
 				continue;
 
 			int piece = board[i][j] & PIECEMASK;
@@ -469,6 +509,98 @@ static int has_legal_move(int ipiece, int jpiece)
 	return 0;
 }
 
+int prompt_promotion_piece(void)
+{
+	char name[PIECENAME_BUF_SIZE];
+
+	int fopts[2];
+	int fans[2];
+	if (pipe(fopts))
+		return -1;
+
+	if (pipe(fans)) {
+		SYSERR();
+		close(fopts[0]);
+		close(fopts[1]);
+		return -1;
+	}
+
+	pid_t pid = fork();
+	if (pid == -1) {
+		SYSERR();
+		close(fans[0]);
+		close(fans[1]);
+		close(fopts[0]);
+		close(fopts[1]);
+		return -1;
+	}
+	
+	if (pid == 0) {
+		close(fopts[1]);
+		close(fans[0]);
+
+		if (dup2(fopts[0], STDIN_FILENO) == -1) {
+			SYSERR();
+			close(fopts[0]);
+			close(fans[1]);
+			exit(-1);
+		}
+		if (dup2(fans[1], STDOUT_FILENO) == -1) {
+			SYSERR();
+			close(fopts[0]);
+			close(fans[1]);
+			exit(-1);
+		}
+
+		execvp(promotion_prompt_cmd[0], (char *const *)promotion_prompt_cmd);
+		SYSERR();
+		exit(-1);
+	} else {
+		close(fopts[0]);
+		close(fans[1]);
+
+		if (write(fopts[1], piece_names[1], strlen(piece_names[1])) == -1) {
+			SYSERR();
+			close(fopts[1]);
+			close(fans[0]);
+			return -1;
+		}
+		for (int i = 2; i < ARRSIZE(piece_names) - 1; ++i) {
+			if (write(fopts[1], "\n", 1) == -1) {
+				SYSERR();
+				close(fopts[1]);
+				close(fans[0]);
+				return -1;
+			}
+			if (write(fopts[1], piece_names[i], strlen(piece_names[i])) == -1) {
+				SYSERR();
+				close(fopts[1]);
+				close(fans[0]);
+				return -1;
+			}
+		}
+		close(fopts[1]);
+
+		int n;
+		if ((n = read(fans[0], name, PIECENAME_BUF_SIZE - 1)) == -1) {
+			SYSERR();
+			close(fans[0]);
+			return -1;
+		}
+		close(fans[0]);
+	}
+
+	int i = -1;
+	for (i = 1; i < ARRSIZE(piece_names) - 1; ++i) {
+		if (strncmp(name, piece_names[i], strlen(piece_names[i])) == 0)
+			break;
+	}
+	if (i == -1)
+		return 0;
+
+	return PIECE_BY_IDX(i);
+}
+
 void game_init_board(int c)
 {
 	playing_color = c;
@@ -489,10 +621,10 @@ void game_init_board(int c)
 
 	for (int j = 0; j < NUM_COLORS; ++j) {
 		board[0][piecerows[j]] = PIECE_ROOK | j | ATTR_CAN_CASTLE;
-		board[1][piecerows[j]] = PIECE_KNIGHT | j | ATTR_CAN_CASTLE;
+		board[1][piecerows[j]] = PIECE_KNIGHT | j;
 		board[2][piecerows[j]] = PIECE_BISHOP | j;
 		board[3][piecerows[j]] = PIECE_QUEEN | j;
-		board[4][piecerows[j]] = PIECE_KING | j;
+		board[4][piecerows[j]] = PIECE_KING | j | ATTR_CAN_CASTLE;
 		board[5][piecerows[j]] = PIECE_BISHOP | j;
 		board[6][piecerows[j]] = PIECE_KNIGHT | j;
 		board[7][piecerows[j]] = PIECE_ROOK | j | ATTR_CAN_CASTLE;
@@ -508,7 +640,7 @@ void game_init_test_board(int c)
 
 	board[4][NF - 1] = PIECE_KING | COLOR_BLACK;
 }
-void game_terminate()
+void game_terminate(void)
 {
 	for (move_info *m = movelast; m; m = m->prev) {
 		free(m);
@@ -520,7 +652,7 @@ int game_is_movable_piece(int i, int j)
 	return ((board[i][j] & PIECEMASK) != PIECE_NONE)
 		&& (board[i][j] & COLORMASK) == playing_color;
 }
-int game_move(int ifrom, int jfrom, int ito, int jto)
+int game_move(int ifrom, int jfrom, int ito, int jto, int prompiece)
 {
 	int piece = board[ifrom][jfrom] & PIECEMASK;
 
@@ -529,9 +661,12 @@ int game_move(int ifrom, int jfrom, int ito, int jto)
 		return 1;
 
 	move_info *m = malloc(sizeof(move_info));
-	if (!m)
+	if (!m) {
+		SYSERR();
 		return -1;
+	}
 	move(ifrom, jfrom, ito, jto, hints, m);
+	print_move(m);
 
 	int iking, jking;
 	get_king(playing_color, &iking, &jking);
@@ -541,14 +676,27 @@ int game_move(int ifrom, int jfrom, int ito, int jto)
 		return 1;
 	}
 
+	if (m->hints & HINT_PROMOTION) {
+		if (prompiece == 0) {
+			while ((prompiece = prompt_promotion_piece()) == 0) {};
+			if (prompiece == -1) {
+				undo_move(m);
+				free(m);
+				return -1;
+			}
+		}
+
+		board[m->ito][m->jto] = playing_color | prompiece;
+	}
+
 	playing_color = OPP_COLOR(playing_color);
 	return 0;
 }
-void game_undo_last_move()
+void game_undo_last_move(void)
 {
 	undo_move(movelast);
 }
-int game_is_stalemate()
+int game_is_stalemate(void)
 {
 	int iking, jking;
 	get_king(playing_color, &iking, &jking);
@@ -568,7 +716,7 @@ int game_is_stalemate()
 
 	return 1;
 }
-int game_is_checkmate()
+int game_is_checkmate(void)
 {
 	int iking, jking;
 	get_king(playing_color, &iking, &jking);
@@ -600,4 +748,34 @@ int game_get_color(int i, int j)
 void game_get_updates(int u[][2])
 {
 	memcpy(u, updates, 2 * NUM_UPDATES_MAX * sizeof(int));
+}
+
+int game_save_board(const char *fname)
+{
+	int fboard = open(fname, O_WRONLY | O_CREAT, 0644);
+	if (fboard == -1)
+		return -1;
+
+	write(fboard, board, NF * NF * sizeof(char));
+	write(fboard, &playing_color, sizeof(int));
+	close(fboard);
+	return 0;
+}
+int game_load_board(const char *fname)
+{
+	int fboard = open(fname, O_RDONLY);
+	if (fboard == -1)
+		return -1;
+
+	read(fboard, board, NF * NF * sizeof(char));
+	read(fboard, &playing_color, sizeof(int));
+	close(fboard);
+
+	for (move_info *m = movelast; m; m = m->prev) {
+		free(m);
+	}
+	movelast = NULL;
+	movefirst = NULL;
+
+	return 0;
 }

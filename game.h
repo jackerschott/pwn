@@ -25,15 +25,18 @@ typedef struct move_info move_info;
 void game_init_board(int c);
 void game_init_test_board(int c);
 
-int game_move(int ifrom, int jfrom, int ito, int jto);
+int game_move(int ifrom, int jfrom, int ito, int jto, int prompiece);
 void game_undo_move(move_info *m);
 
 int game_is_movable_piece(int i, int j);
-int game_is_stalemate();
-int game_is_checkmate();
+int game_is_stalemate(void);
+int game_is_checkmate(void);
 
 int game_get_piece(int i, int j);
 int game_get_color(int i, int j);
-void game_get_updates();
+void game_get_updates(int u[][2]);
+
+int game_save_board(const char *fname);
+int game_load_board(const char *fname);
 
 #endif /* GAME_H */

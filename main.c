@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include <X11/Xlib.h>
+#include <X11/keysym.h>
 #include <cairo/cairo-xlib.h>
 
 #include "draw.h"
@@ -91,7 +92,7 @@ static void show_move(int ifrom, int jfrom, int ito, int jto, int updates[][2])
 
 static void move(int ifrom, int jfrom, int ito, int jto)
 {
-	if (game_move(ifrom, jfrom, ito, jto))
+	if (game_move(ifrom, jfrom, ito, jto, 0))
 		return;
 
 	int updates[NUM_UPDATES_MAX][2];
@@ -140,19 +141,17 @@ void on_configure(XConfigureEvent *e)
 	}
 	draw_commit();
 }
-
 void on_button_press(XButtonEvent *e)
 {
 	int i = XTOI(e->x);
 	int j = YTOJ(e->y);
 	if (itouched != -1 && jtouched != -1) {
 		move(itouched, jtouched, i, j);
-		unselect_field(i, j);
+		unselect_field(itouched, jtouched);
 	} else if (game_is_movable_piece(i, j)) {
 		select_field(i, j);
 	}
 }
-
 void on_button_release(XButtonEvent *e)
 {
 	if (itouched == -1 && jtouched == -1)
@@ -163,6 +162,18 @@ void on_button_release(XButtonEvent *e)
 	if (itouched != i || jtouched != j) {
 		move(itouched, jtouched, i, j);
 		unselect_field(itouched, jtouched);
+	}
+}
+void on_keypress(XKeyEvent *e)
+{
+	KeySym ksym = XLookupKeysym(e, 0);
+
+	if (ksym == XK_s) {
+		if (game_save_board("board")) {
+			perror("game_save_board");
+			exit(-1);
+		}
+		printf("board saved\n");
 	}
 }
 
@@ -187,10 +198,7 @@ void setup(void)
 	board_domain.xorig = 0;
 	board_domain.yorig = 0;
 	board_domain.size = winwidth;
-
-	game_init_board(player_color);
 }
-
 void cleanup(void)
 {
 	draw_destroy_context();
@@ -199,7 +207,6 @@ void cleanup(void)
 	XDestroyWindow(dpy, winmain);
 	XCloseDisplay(dpy);
 }
-
 void run(void)
 {
 	int quit = 0;
@@ -212,6 +219,8 @@ void run(void)
 			on_button_press(&ev.xbutton);
 		} else if (ev.type == ButtonRelease) {
 			on_button_release(&ev.xbutton);
+		} else if (ev.type == KeyPress) {
+			on_keypress(&ev.xkey);
 		}
 	}
 }
@@ -225,6 +234,16 @@ int main(int argc, char *argv[])
 	}
 
 	setup();
+
+	if (argc > 1) {
+		if (game_load_board(argv[1])) {
+			perror("game_load_board");
+			exit(-1);
+		}
+	} else {
+		game_init_board(player_color);
+	}
+
 	run();
 	cleanup();
 	return 0;
