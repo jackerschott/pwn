@@ -1,5 +1,5 @@
 #include <math.h>
-#include "util.h"
+#include "chess.h"
 #include "draw.h"
 
 #define COLOR(r, g, b, a) ((color){ (r) / ((double)0xff), (g) / ((double)0xff), (b) / ((double)0xff), (a) / ((double)0xff) })
@@ -207,7 +207,7 @@ static void draw_queen(double x, double y, double size, int palette)
 	cairo_curve_to(cr, 12.5, 31.5, 12.5, 31, 12, 33.5);
 	cairo_curve_to(cr, 10.5, 34.5, 10.5, 36, 10.5, 36);
 	cairo_curve_to(cr, 9, 37.5, 11, 38.5, 11, 38.5);
-	if (palette == PALETTE_DARK) {
+	if (palette == PALETTE_LIGHT) {
 		cairo_curve_to(cr, 17.5, 39.5, 27.5, 39.5, 34, 38.5);
 	} else {
 		cairo_curve_to(cr, 17.5, 41.0, 27.5, 41.0, 34, 38.5);
@@ -616,6 +616,12 @@ void draw_record()
 void draw_commit()
 {
 	cairo_pop_group_to_source(cr);
+	cairo_paint(cr);
+}
+
+void draw_clear()
+{
+	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
 	cairo_paint(cr);
 }
 

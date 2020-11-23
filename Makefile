@@ -5,8 +5,8 @@ SRC = main.c game.c draw.c
 OBJ = $(addprefix obj/,$(SRC:c=o))
 OBJDIR = obj
 
-INCS = -I.
-LIBS = -lcairo -lX11
+INCS = 
+LIBS = -lpthread -lcairo -lX11
 
 CFLAGS = -g $(INCS)
 LDFLAGS = $(LIBS)

@@ -19,6 +19,7 @@ void draw_destroy_context();
 void draw_record();
 void draw_commit();
 
+void draw_clear();
 void draw_field(double x, double y, double size, int palette, int selected);
 void draw_piece(double x, double y, double size, int figure, int palette);
 
