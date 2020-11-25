@@ -25,7 +25,6 @@
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define SGN(i) ((i > 0) - (i < 0))
 
-#define OPP_COLOR(c) ((!(c)) & COLORMASK)
 #define PIECE_IDX(p) ((p) / 2 - 1)
 #define PIECE_BY_IDX(i) (2 * (i) + 2)
 #define COL_CHAR(i) ('a' + i)
@@ -600,23 +599,16 @@ int prompt_promotion_piece(void)
 	return PIECE_BY_IDX(i);
 }
 
-void game_init_board(color_t c)
+void game_init_board(void)
 {
-	playing_color = c;
+	playing_color = COLOR_WHITE;
 
 	fid pawnrows[2];
 	fid piecerows[2];
-	if (c == COLOR_WHITE) {
-		piecerows[0] = 0;
-		piecerows[1] = NF - 1;
-		pawnrows[0] = 1;
-		pawnrows[1] = NF - 2;
-	} else {
-		piecerows[0] = NF - 1;
-		piecerows[1] = 0;
-		pawnrows[0] = NF - 2;
-		pawnrows[1] = 1;
-	}
+	piecerows[0] = 0;
+	piecerows[1] = NF - 1;
+	pawnrows[0] = 1;
+	pawnrows[1] = NF - 2;
 
 	for (int j = 0; j < NUM_COLORS; ++j) {
 		board[0][piecerows[j]] = PIECE_ROOK | j | ATTR_CAN_CASTLE;
@@ -632,7 +624,7 @@ void game_init_board(color_t c)
 		}
 	}
 }
-void game_init_test_board(color_t c)
+void game_init_test_board(void)
 {
 	board[3][0] = PIECE_QUEEN | COLOR_WHITE;
 	board[4][0] = PIECE_KING | COLOR_WHITE;

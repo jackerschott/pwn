@@ -7,8 +7,9 @@
 
 typedef struct moveinfo_t moveinfo_t;
 
-void game_init_board(color_t c);
-void game_init_test_board(color_t c);
+void game_init_board(void);
+void game_init_test_board(void);
+void game_terminate(void);
 
 int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece);
 void game_undo_move(moveinfo_t *m);

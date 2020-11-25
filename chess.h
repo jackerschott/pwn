@@ -19,6 +19,10 @@
 	fprintf(stderr, "%i ", errno); \
 	perror(NULL); \
 } while (0);
+#define GAIERR(err) do { \
+	fprintf(stderr, "%s:%d/%s: ", __FILE__, __LINE__, __func__); \
+	fprintf(stderr, "%s", gai_strerror((err))); \
+} while (0);
 #if 0
 #define SYSERR() do { \
 	fprintf(stderr, "%s: ", __func__); \
@@ -45,6 +49,8 @@
 
 #define PIECEMASK 0b1110
 #define COLORMASK 0b0001
+
+#define OPP_COLOR(c) ((c) ^ COLORMASK)
 
 typedef char fid;
 typedef char piece_t;
