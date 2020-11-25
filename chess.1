@@ -1,0 +1,84 @@
+.TH CHESS 1 chess\-1.0
+.SH NAME
+chess \- simple chess application
+.SH SYNOPSIS
+.B chess
+.RB [-c\ color]
+.RB [-h\ host\ address]
+.RB [-t\ time]
+.SH DESCRIPTION
+chess is a simple chess application for the X Window System. It supports playing with time control
+and playing over a network.
+.SH OPTIONS
+.TP
+.B \-a host address
+Set
+.I host address
+as the IP address of the host, which whom you want to play over a network. This option implies that
+you are playing with the opposite color of the one specified by your oppenent. Also, the omission
+of this option implies that you are listening for an incoming connection by your opponent.
+.TP
+.B \-c color
+Set
+.I color
+as the color you want to play with. A valid color is either
+.I black
+or
+.I white
+This option can only be specified when you are listening for an incoming connection by your opponent.
+After a successfull connection your opponent will be playing with the opposite color of the one you
+specified. If this option is omitted the color gets chosen randomly
+.TP
+.B \-t time
+Set
+.I time
+as the total time each player has for the game. It has to be specified in the format
+.I h:m[+s]
+where
+.I h
+are the hours and
+.I m
+the minutes, each player gets, whereas
+.I s
+specify an (optional) increment that will be added to the total timespan of each player, every time
+they make a move. If a player has used up all of his time, before the game was finished, the game
+will be decided, either by a draw or by a loss for the respective player. If this option is omitted,
+there is no time limit. This option can only be specified when you are listening for an incoming
+connection by your opponent.
+.SH EXAMPLES
+As an example: To start a game between Hosts
+.I A
+with an IP address of
+.I 192.168.0.2
+and
+.I B
+with an IP address of
+.I 192.168.0.3
+run
+.sp
+.RS 4
+.nf
+chess -c white -t 1:30+10
+.fi
+.P
+.RE
+.P
+on host
+.I A
+and
+.sp
+.RS 4
+.nf
+chess -h 192.168.0.2
+.fi
+.P
+.RE
+.P
+on host
+.I B\fR.
+For this game,
+.I A
+is playing with the white pieces, while
+.I B
+is playing with the black ones. Each player will have 1 hour and 30 minutes for all moves, with a 10
+second increment on every move.
