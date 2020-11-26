@@ -1,14 +1,14 @@
 include config.mk
 
 PROG = chess
-SRC = main.c game.c draw.c
+SRC = main.c gfxh.c comh.c handler.c game.c draw.c
 OBJ = $(addprefix obj/,$(SRC:c=o))
 OBJDIR = obj
 
 INCS = 
 LIBS = -lpthread -lcairo -lX11
 
-CFLAGS = -g $(INCS)
+CFLAGS = -g -O0 $(INCS)
 LDFLAGS = $(LIBS)
 
 $(PROG): $(OBJDIR) $(OBJ)
