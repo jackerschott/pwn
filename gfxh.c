@@ -214,7 +214,7 @@ static void handle_redraw(struct event_redraw *e)
 	pthread_mutex_unlock(&hctx->gfxhlock);
 
 	int ret = 0;
-	if (writebuf(fconfirm, &ret, sizeof(ret)) == -1) {
+	if (hwrite(fconfirm, &ret, sizeof(ret)) == -1) {
 		SYSERR();
 		gfxh_cleanup();
 		pthread_exit(NULL);
@@ -287,18 +287,18 @@ static void handle_touch(struct event_touch *e)
 		}
 
 		union event_t event;
-		event.syncmoves.type = EVENT_SYNCMOVES;
-		memcpy(event.syncmoves.from, selfield, sizeof(selfield));
-		memcpy(event.syncmoves.to, f, sizeof(f));
-		event.syncmoves.tmove = 0;
-		if (writebuf(hctx->comh.pevent[1], &event, sizeof(event)) == -1) {
+		event.sendmove.type = EVENT_SENDMOVE;
+		memcpy(event.sendmove.from, selfield, sizeof(selfield));
+		memcpy(event.sendmove.to, f, sizeof(f));
+		event.sendmove.tmove = 0;
+		if (hwrite(hctx->comh.pevent[1], &event, sizeof(event)) == -1) {
 			SYSERR();
 			gfxh_cleanup();
 			pthread_exit(NULL);
 		}
 
 		int ret;
-		if (readbuf(hctx->comh.pconfirm[0], &ret, sizeof(ret)) == -1) {
+		if (hread(hctx->comh.pconfirm[0], &ret, sizeof(ret)) == -1) {
 			SYSERR();
 			gfxh_cleanup();
 			pthread_exit(NULL);
@@ -307,7 +307,7 @@ static void handle_touch(struct event_touch *e)
 		move(selfield, f);
 	}
 }
-static void handle_oppmove(struct event_oppmove *e)
+static void handle_playmove(struct event_passmove *e)
 {
 	pthread_mutex_lock(&hctx->gamelock);
 	game_move(e->from[0], e->from[1], e->to[0], e->to[1], 0);
@@ -337,7 +337,7 @@ static void gfxh_run(void)
 {
 	union event_t event;
 	while (1) {
-		if (readbuf(fevent, &event, sizeof(event)) == -1) {
+		if (hread(fevent, &event, sizeof(event)) == -1) {
 			SYSERR();
 			gfxh_cleanup();
 			pthread_exit(NULL);
@@ -347,8 +347,8 @@ static void gfxh_run(void)
 			handle_redraw(&event.redraw);
 		} else if (event.type == EVENT_TOUCH) {
 			handle_touch(&event.touch);
-		} else if (event.type == EVENT_OPPMOVE) {
-			handle_oppmove(&event.oppmove);
+		} else if (event.type == EVENT_PLAYMOVE) {
+			handle_playmove(&event.playmove);
 		} else if (event.type == EVENT_TERM) {
 			break;
 		}

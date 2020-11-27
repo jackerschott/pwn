@@ -10,8 +10,9 @@
 enum {
 	EVENT_REDRAW,
 	EVENT_TOUCH,
-	EVENT_OPPMOVE,
-	EVENT_SYNCMOVES,
+	EVENT_PLAYMOVE,
+	EVENT_SENDMOVE,
+	EVENT_RECVMOVE,
 	EVENT_TERM,
 };
 enum {
@@ -29,13 +30,7 @@ struct event_touch {
 	long ttouch;
 	int flags;
 };
-struct event_oppmove {
-	char type;
-	fid from[2];
-	fid to[2];
-	long tmove;
-};
-struct event_syncmoves {
+struct event_passmove {
 	char type;
 	fid from[2];
 	fid to[2];
@@ -48,8 +43,9 @@ union event_t {
 	char type;
 	struct event_redraw redraw;
 	struct event_touch touch;
-	struct event_oppmove oppmove;
-	struct event_syncmoves syncmoves;
+	struct event_passmove playmove;
+	struct event_passmove sendmove;
+	struct event_passmove recvmove;
 	struct event_term term;
 };
 
@@ -82,10 +78,7 @@ struct handler_context_t {
 	int terminate;
 };
 
-int readbuf(int fd, void *buf, size_t size);
-int writebuf(int fd, void *buf, size_t size);
-
-int sendbuf(int fd, void *buf, size_t size);
-int recvbuf(int fd, void *buf, size_t size);
+int hread(int fd, void *buf, size_t size);
+int hwrite(int fd, void *buf, size_t size);
 
 #endif /* HANDLER_H */

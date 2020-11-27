@@ -112,7 +112,7 @@ static void stop_communicationhandler(void)
 	printf("stop communicationhandler\n");
 	union event_t event;
 	event.term.type = EVENT_TERM;
-	if (writebuf(hctx->comh.pevent[1], &event, sizeof(event)) == -1)
+	if (hwrite(hctx->comh.pevent[1], &event, sizeof(event)) == -1)
 		fprintf(stderr, "%s: error while terminating communicationhandler thread", __func__);
 
 	if ((errno = pthread_join(hctx->comh.id, NULL)))
@@ -194,7 +194,7 @@ static void stop_graphicshandler(void)
 	printf("stop graphicshandler\n");
 	union event_t event;
 	event.term.type = EVENT_TERM;
-	if (writebuf(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1)
+	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1)
 		fprintf(stderr, "%s: error while terminating communicationhandler thread", __func__);
 
 	if ((errno = pthread_join(hctx->gfxh.id, NULL)))
@@ -217,14 +217,14 @@ static void on_configure(XConfigureEvent *e)
 	event.redraw.type = EVENT_REDRAW;
 	event.redraw.width = e->width;
 	event.redraw.height = e->height;
-	if (writebuf(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
+	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
 	}
 
 	int res;
-	if (readbuf(hctx->gfxh.pconfirm[0], &res, sizeof(res)) == -1) {
+	if (hread(hctx->gfxh.pconfirm[0], &res, sizeof(res)) == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
@@ -243,7 +243,7 @@ static void on_button_press(XButtonEvent *e)
 	event.touch.type = EVENT_TOUCH;
 	event.touch.x = e->x;
 	event.touch.y = e->y;
-	if (writebuf(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
+	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
@@ -256,7 +256,7 @@ static void on_button_release(XButtonEvent *e)
 	event.touch.x = e->x;
 	event.touch.y = e->y;
 	event.touch.flags = TOUCH_RELEASE;
-	if (writebuf(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
+	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
