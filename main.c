@@ -36,7 +36,6 @@
 #include "pwn.h"
 #include "config.h"
 #include "game.h"
-#include "comh.h"
 #include "gfxh.h"
 
 /* options */
@@ -53,172 +52,70 @@ struct {
 /* X11 */
 static Display *dpy;
 static Window winmain;
-enum { WMDeleteWindow, WMCount };
+enum { WMDeleteWindow, WMName, WMCount };
 static Atom atoms[WMCount];
 
 static struct handler_context_t *hctx;
 
 static void cleanup(void);
 
-static void start_communicationhandler(int fopp)
+static int start_thread(void *args, void *(*main)(void *), int stacksize, pthread_t *id)
 {
-	const int stacksize = 4096 * 64;
-
+	pthread_attr_t attr;
+	if ((errno = pthread_attr_init(&attr))) {
+		return 1;
+	}
+	if ((errno = pthread_attr_setstacksize(&attr, stacksize))) {
+		pthread_attr_destroy(&attr);
+		return 1;
+	}
+	if ((errno = pthread_create(id, &attr, main, args))) {
+		pthread_attr_destroy(&attr);
+	}
+	pthread_attr_destroy(&attr);
+	return 0;
+}
+static int start_handler(void *args, int state, void *(*main)(void *), struct handler_t *h)
+{
 	int pevent[2];
 	int pconfirm[2];
 	if (pipe(pevent) == -1) {
-		SYSERR();
-		cleanup();
-		exit(-1);
+		return 1;
 	}
 	if (pipe(pconfirm) == -1) {
 		close(pevent[0]);
 		close(pevent[1]);
-		cleanup();
-		exit(-1);
+		return 1;
 	}
 
-	memcpy(hctx->comh.pevent, pevent, 2 * sizeof(int));
-	memcpy(hctx->comh.pconfirm, pconfirm, 2 * sizeof(int));
-	hctx->comh.state = COMH_IS_EXCHANGING;
+	memcpy(h->pevent, pevent, 2 * sizeof(int));
+	memcpy(h->pconfirm, pconfirm, 2 * sizeof(int));
+	h->state = state;
 
-	pthread_attr_t attr;
-	if ((errno = pthread_attr_init(&attr))) {
-		SYSERR();
-		goto err_close_pipes;
-	}
-	if ((errno = pthread_attr_setstacksize(&attr, stacksize))) {
-		SYSERR();
-		if ((errno = pthread_attr_destroy(&attr)))
-			fprintf(stderr, "%s: error while destroying movehandler thread attributes\n", __func__);
-		goto err_close_pipes;
-	}
+	return start_thread(args, main, HANDLER_STACKSIZE, &h->id);
 
-	struct comh_args_t *args = malloc(sizeof(*args));
-	if (!args) {
-		SYSERR();
-		if ((errno = pthread_attr_destroy(&attr)))
-			fprintf(stderr, "%s: error while destroying movehandler thread attributes\n", __func__);
-		goto err_close_pipes;
-	}
-	args->hctx = hctx;
-	args->fopp = fopp;
-	args->gamecolor = options.color;
-	if ((errno = pthread_create(&hctx->comh.id, &attr, comh_main, args))) {
-		SYSERR();
-		if ((errno = pthread_attr_destroy(&attr)))
-			fprintf(stderr, "%s: error while destroying movehandler thread attributes\n", __func__);
-		goto err_close_pipes;
-	}
-	if ((errno = pthread_attr_destroy(&attr))) {
-		SYSERR();
-		cleanup();
-		exit(-1);
-	}
-
-	return;
-
-err_close_pipes:
-	close(hctx->comh.pevent[0]);
-	close(hctx->comh.pevent[1]);
-	close(hctx->comh.pconfirm[0]);
-	close(hctx->comh.pconfirm[1]);
-	cleanup();
+err_pthread:
+	close(h->pevent[0]);
+	close(h->pevent[1]);
+	close(h->pconfirm[0]);
+	close(h->pconfirm[1]);
+	return 1;
 }
-static void stop_communicationhandler(void)
+static int stop_handler(struct handler_t *h)
 {
-	union event_t event;
-	event.term.type = EVENT_TERM;
-	if (hwrite(hctx->comh.pevent[1], &event, sizeof(event)) == -1)
-		fprintf(stderr, "%s: error while terminating communicationhandler thread", __func__);
-
-	if ((errno = pthread_join(hctx->comh.id, NULL)))
-		fprintf(stderr, "%s: error while joining communicationhandler thread\n", __func__);
-
-	if (close(hctx->comh.pevent[0]) == -1 || close(hctx->comh.pevent[1])
-			|| close(hctx->comh.pconfirm[0]) || close(hctx->comh.pconfirm[1]))
-		fprintf(stderr, "%s: error while closing event pipe, potential data loss\n", __func__);
-}
-static void start_graphicshandler(Display *d, Window win, Visual *vis)
-{
-	const int stacksize = 4096 * 64;
-
-	int pevent[2];
-	int pconfirm[2];
-	if (pipe(pevent) == -1) {
-		SYSERR();
-		cleanup();
-		exit(-1);
-	}
-	if (pipe(pconfirm) == -1) {
-		close(pevent[0]);
-		close(pevent[1]);
-		cleanup();
-		exit(-1);
-	}
-		
-	memcpy(hctx->gfxh.pevent, pevent, 2 * sizeof(int));
-	memcpy(hctx->gfxh.pconfirm, pconfirm, 2 * sizeof(int));
-
-	pthread_attr_t attr;
-	if ((errno = pthread_attr_init(&attr))) {
-		SYSERR();
-		goto err_close_pipes;
-	}
-	if ((errno = pthread_attr_setstacksize(&attr, stacksize))) {
-		SYSERR();
-		if ((errno = pthread_attr_destroy(&attr)))
-			fprintf(stderr, "%s: error while destroying movehandler thread attributes\n", __func__);
-		goto err_close_pipes;
+	int ret = 0;
+	if (close(h->pevent[1]) == -1) {
+		fprintf(stderr, "warning: there could be a problem in handler thread termination");
+		ret = 1;
 	}
 
-	struct gfxh_args_t *args = malloc(sizeof(*args));
-	if (!args) {
-		SYSERR();
-		if ((errno = pthread_attr_destroy(&attr)))
-			fprintf(stderr, "%s: error while destroying movehandler thread attributes\n", __func__);
-		goto err_close_pipes;
-	}
-	args->hctx = hctx;
-	args->dpy = d;
-	args->winmain = win;
-	args->vis = vis;
-	args->gamecolor = options.color;
-	if ((errno = pthread_create(&hctx->gfxh.id, &attr, gfxh_main, args))) {
-		SYSERR();
-		free(args);
-		if ((errno = pthread_attr_destroy(&attr)))
-			fprintf(stderr, "%s: error while destroying movehandler thread attributes\n", __func__);
-		goto err_close_pipes;
-	}
-	if ((errno = pthread_attr_destroy(&attr))) {
-		SYSERR();
-		cleanup();
-		exit(-1);
-	}
-	return;
+	if ((errno = pthread_join(h->id, NULL)))
+		ret = 1;
 
-err_close_pipes:
-	close(hctx->gfxh.pevent[0]);
-	close(hctx->gfxh.pevent[1]);
-	close(hctx->gfxh.pconfirm[0]);
-	close(hctx->gfxh.pconfirm[1]);
-	cleanup();
-	exit(-1);
-}
-static void stop_graphicshandler(void)
-{
-	union event_t event;
-	event.term.type = EVENT_TERM;
-	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1)
-		fprintf(stderr, "%s: error while terminating communicationhandler thread", __func__);
+	if (close(h->pevent[0]) == -1 || close(h->pconfirm[0]) == -1 || close(h->pconfirm[1]) == -1)
+		ret = 1;
 
-	if ((errno = pthread_join(hctx->gfxh.id, NULL)))
-		fprintf(stderr, "%s: error while joining communicationhandler thread\n", __func__);
-
-	if (close(hctx->gfxh.pevent[0]) == -1 || close(hctx->gfxh.pevent[1])
-			|| close(hctx->gfxh.pconfirm[0]) || close(hctx->gfxh.pconfirm[1]))
-		fprintf(stderr, "%s: error while closing event pipe, potential data loss\n", __func__);
+	return ret;
 }
 
 static void on_configure(XConfigureEvent *e)
@@ -259,6 +156,7 @@ static void on_button_press(XButtonEvent *e)
 	event.touch.type = EVENT_TOUCH;
 	event.touch.x = e->x;
 	event.touch.y = e->y;
+	event.touch.flags = TOUCH_PRESS;
 	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
 		SYSERR();
 		cleanup();
@@ -305,7 +203,7 @@ static void set_option(char key, const char *val)
 		if (!val)
 			goto err_noarg;
 
-		char *node = malloc(sizeof(val));
+		char *node = malloc(strlen(val) + 1);
 		if (!node) {
 			SYSERR();
 			free_options();
@@ -329,7 +227,7 @@ static void set_option(char key, const char *val)
 		if (!val)
 			goto err_noarg;
 
-		char *node = malloc(sizeof(val));
+		char *node = malloc(strlen(val) + 1);
 		if (!node) {
 			SYSERR();
 			free_options();
@@ -435,10 +333,13 @@ static int init_communication(int *fd, int *err)
 			return -2;
 		}
 
+		int val = 1;
+		setsockopt(fsock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 		if (bind(fsock, res->ai_addr, res->ai_addrlen) == -1) {
 			close(fsock);
 			return -1;
 		}
+		freeaddrinfo(res);
 
 		struct sockaddr addr;
 		if (listen(fsock, 1) == -1) {
@@ -499,6 +400,8 @@ static int init_communication(int *fd, int *err)
 
 static void setup(void)
 {
+	int ret;
+
 	int gaierr;
 	int fopp;
 	int err = init_communication(&fopp, &gaierr);
@@ -515,6 +418,14 @@ static void setup(void)
 	}
 
 	game_init_board();
+
+	/* setup X */
+	dpy = XOpenDisplay(NULL);
+	if (!dpy) {
+		fprintf(stderr, "could not open X display\n");
+		ret = 1;
+		goto cleanup_err_x;
+	}
 
 	int scr = DefaultScreen(dpy);
 	Window root = RootWindow(dpy, scr);
@@ -536,32 +447,54 @@ static void setup(void)
 
 	XSetWMProtocols(dpy, winmain, &atoms[WMDeleteWindow], 1);
 
+	/* setup handlers */
 	hctx = malloc(sizeof(*hctx));
 	if (!hctx) {
 		SYSERR();
-		close(fopp);
-		exit(-1);
+		ret = -1;
+		goto cleanup_err_threads;
 	}
 	memset(hctx, 0, sizeof(*hctx));
 
 	pthread_mutex_init(&hctx->gamelock, NULL);
 	pthread_mutex_init(&hctx->xlock, NULL);
 	pthread_mutex_init(&hctx->gfxhlock, NULL);
-	pthread_mutex_init(&hctx->comhlock, NULL);
 	pthread_mutex_init(&hctx->mainlock, NULL);
 
-	start_communicationhandler(fopp);
-	start_graphicshandler(dpy, winmain, vis);
+	struct gfxh_args_t *gfxhargs = malloc(sizeof(*gfxhargs));
+	if (!gfxhargs) {
+		SYSERR();
+		free(hctx);
+		goto cleanup_err_threads;
+	}
+	gfxhargs->hctx = hctx;
+	gfxhargs->dpy = dpy;
+	gfxhargs->winmain = winmain;
+	gfxhargs->vis = vis;
+	gfxhargs->fopp = fopp;
+	gfxhargs->gamecolor = options.color;
+	if (start_handler(gfxhargs, 0, gfxh_main, &hctx->gfxh)) {
+		fprintf(stderr, "error while starting graphics handler thread");
+		free(gfxhargs);
+		free(hctx);
+		goto cleanup_err_threads;
+	}
+	return;
+
+cleanup_err_threads:
+	XUnmapWindow(dpy, winmain);
+	XDestroyWindow(dpy, winmain);
+	XCloseDisplay(dpy);
+cleanup_err_x:
+	game_terminate();
+	exit(ret);
 }
 static void cleanup(void)
 {
-	if (hctx->gfxh.id)
-		stop_graphicshandler();
-	if (hctx->comh.id)
-		stop_communicationhandler();
+	if (stop_handler(&hctx->gfxh))
+		fprintf(stderr, "error while terminating graphics handler thread\n");
 
 	pthread_mutex_destroy(&hctx->mainlock);
-	pthread_mutex_destroy(&hctx->comhlock);
 	pthread_mutex_destroy(&hctx->gfxhlock);
 	pthread_mutex_destroy(&hctx->xlock);
 	pthread_mutex_destroy(&hctx->gamelock);
@@ -571,13 +504,16 @@ static void cleanup(void)
 	XDestroyWindow(dpy, winmain);
 	XCloseDisplay(dpy);
 	game_terminate();
-
 }
 static void run(void)
 {
 	XEvent ev;
 	int term = 0;
 	while (!term) {
+		pthread_mutex_lock(&hctx->mainlock);
+		term = hctx->terminate;
+		pthread_mutex_unlock(&hctx->mainlock);
+
 		/* Prevent blocking of XNextEvent inside mutex lock */
 		pthread_mutex_lock(&hctx->xlock);
 		int n = XPending(dpy);
@@ -600,10 +536,6 @@ static void run(void)
 		} else if (ev.type == KeyPress) {
 			on_keypress(&ev.xkey);
 		}
-
-		pthread_mutex_lock(&hctx->mainlock);
-		term = hctx->terminate;
-		pthread_mutex_unlock(&hctx->mainlock);
 	}
 }
 int main(int argc, char *argv[])
@@ -619,24 +551,6 @@ int main(int argc, char *argv[])
 	//	game_init_board(player_color);
 	//}
 
-	//struct sigaction act;
-	//struct sigaction oldact;
-
-	//act.sa_handler = handle_sigchild;
-	//sigemptyset(&act.sa_mask);
-	//act.sa_flags = 0;
-	//sigaction(SIGCHLD, &act, NULL);
-
-	if (!XInitThreads()) {
-		fprintf(stderr, "could not initialize X threads");
-		exit(1);
-	}
-
-	dpy = XOpenDisplay(NULL);
-	if (!dpy) {
-		fprintf(stderr, "could not open X display");
-		exit(1);
-	}
 
 	setup();
 	run();

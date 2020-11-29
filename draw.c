@@ -669,6 +669,9 @@ void draw_field(double x, double y, double size, int palette, int selected)
 	}
 
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
+
+	cairo_pattern_destroy(def);
+	cairo_pattern_destroy(sel);
 }
 void draw_piece(double x, double y, double size, int figure, int palette)
 {

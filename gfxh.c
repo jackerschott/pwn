@@ -16,7 +16,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <fcntl.h>
+#include <poll.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <cairo/cairo-xlib.h>
 #include <X11/Xlib.h>
@@ -24,7 +27,6 @@
 #include "draw.h"
 #include "game.h"
 
-#include "comh.h"
 #include "gfxh.h"
 
 #define XTOI(x, xorig, fieldsize) ((int)(((x) - xorig) / fieldsize))
@@ -37,8 +39,13 @@
 #define FIGURE(p) ((p) / 2 - 1)
 #define PALETTE(c) (c)
 
+#define TIME_UPDATE_INTERVAL (1000L * 1000L * 1000L)
+
+int fopp;
+
 static color_t gamecolor;
 static fid selfield[2];
+static long tfirstmove = -1;
 static struct {
 	cairo_surface_t *surface;
 	double xorig;
@@ -55,6 +62,7 @@ static struct handler_context_t *hctx;
 static int fevent;
 static int fconfirm;
 static int *state;
+struct pollfd pfds[2];
 
 static void gfxh_cleanup(void);
 
@@ -288,33 +296,23 @@ static void handle_touch(struct event_touch *e)
 				selectf(f);
 		}
 	} else if (selfield[0] != -1) {
-		pthread_mutex_lock(&hctx->comhlock);
-		int canmove = !(hctx->comh.state & COMH_IS_EXCHANGING);
-		pthread_mutex_unlock(&hctx->comhlock);
-		if (!canmove) {
-			unselectf(selfield);
-			return;
-		}
-
 		pthread_mutex_lock(&hctx->gamelock);
 		int err = game_move(selfield[0], selfield[1], f[0], f[1], 0);
 		pthread_mutex_unlock(&hctx->gamelock);
 		if (err)
 			return;
 
-		union event_t event;
-		event.sendmove.type = EVENT_SENDMOVE;
-		memcpy(event.sendmove.from, selfield, sizeof(selfield));
-		memcpy(event.sendmove.to, f, sizeof(f));
-		event.sendmove.tmove = 0;
-		if (hwrite(hctx->comh.pevent[1], &event, sizeof(event)) == -1) {
-			SYSERR();
-			gfxh_cleanup();
-			pthread_exit(NULL);
-		}
+		struct timespec tp;
+		clock_gettime(CLOCK_MONOTONIC, &tp);
+		if (tfirstmove == -1)
+			tfirstmove = tp.tv_nsec;
 
-		int ret;
-		if (hread(hctx->comh.pconfirm[0], &ret, sizeof(ret)) == -1) {
+		union event_t event;
+		event.playmove.type = EVENT_SENDMOVE;
+		memcpy(event.playmove.from, selfield, sizeof(selfield));
+		memcpy(event.playmove.to, f, sizeof(f));
+		event.playmove.tmove = tp.tv_nsec - tfirstmove;
+		if (hsend(fopp, &event, sizeof(event)) == -1) {
 			SYSERR();
 			gfxh_cleanup();
 			pthread_exit(NULL);
@@ -323,16 +321,33 @@ static void handle_touch(struct event_touch *e)
 		move(selfield, f);
 	}
 }
-static void handle_playmove(struct event_passmove *e)
+static void handle_playmove(struct event_playmove *e)
 {
+	if (tfirstmove == -1)
+		tfirstmove = e->tmove;
+
 	pthread_mutex_lock(&hctx->gamelock);
 	game_move(e->from[0], e->from[1], e->to[0], e->to[1], 0);
 	pthread_mutex_unlock(&hctx->gamelock);
 	move(e->from, e->to);
 }
+static void handle_updatetime(long t)
+{
+	printf("%li", t);
+}
 
 static void gfxh_setup(void)
 {
+	if (fcntl(fevent, F_SETFL, O_NONBLOCK) == -1)
+		goto cleanup_err_sys;
+	if (fcntl(fopp, F_SETFL, O_NONBLOCK) == -1)
+		goto cleanup_err_sys;
+
+	pfds[0].fd = fevent;
+	pfds[0].events = POLLIN;
+	pfds[1].fd = fopp;
+	pfds[1].events = POLLIN;
+
 	selfield[0] = -1;
 	selfield[1] = -1;
 
@@ -348,27 +363,67 @@ static void gfxh_setup(void)
 	board.yorig = 0;
 	board.size = wa.width;
 	board.fieldsize = wa.height / NF;
+	return;
+
+cleanup_err_sys:
+	SYSERR();
+	pthread_mutex_lock(&hctx->mainlock);
+	hctx->terminate = 1;
+	pthread_mutex_unlock(&hctx->mainlock);
+	pthread_exit(NULL);
 }
 static void gfxh_run(void)
 {
 	union event_t event;
 	while (1) {
-		if (hread(fevent, &event, sizeof(event)) == -1) {
+		int n = poll(pfds, ARRSIZE(pfds), 0);
+		if (n == -1) {
 			SYSERR();
-			gfxh_cleanup();
-			pthread_exit(NULL);
+			goto cleanup_err_sys;
 		}
 
-		if (event.type == EVENT_REDRAW) {
-			handle_redraw(&event.redraw);
-		} else if (event.type == EVENT_TOUCH) {
-			handle_touch(&event.touch);
-		} else if (event.type == EVENT_PLAYMOVE) {
+		if (n == 0 && tfirstmove != -1) {
+			struct timespec tp;
+			clock_gettime(CLOCK_MONOTONIC, &tp);
+			printf("%li\n", tp.tv_nsec);
+			if ((tp.tv_nsec - tfirstmove) > TIME_UPDATE_INTERVAL) {
+				handle_updatetime(tp.tv_nsec);
+			}
+		} else if (pfds[0].revents) {
+			n = hread(fevent, &event, sizeof(event));
+			if (n == -1) {
+				SYSERR();
+				goto cleanup_err_sys;
+			} else if (n == 1) {
+				break;
+			} else if (n == 2) {
+				continue;
+			}
+
+			if (event.type == EVENT_REDRAW) {
+				handle_redraw(&event.redraw);
+			} else if (event.type == EVENT_TOUCH) {
+				handle_touch(&event.touch);
+			}
+		} else if (pfds[1].revents) {
+			n = hrecv(fopp, &event, sizeof(event));
+			if (n == -1) {
+				SYSERR();
+				goto cleanup_err_sys;
+			} else if (n == 1) {
+				break;
+			} else if (n == 2) {
+				continue;
+			}
+
 			handle_playmove(&event.playmove);
-		} else if (event.type == EVENT_TERM) {
-			break;
 		}
 	}
+	return;
+
+cleanup_err_sys:
+	gfxh_cleanup();
+	pthread_exit(NULL);
 }
 static void gfxh_cleanup(void)
 {
@@ -376,6 +431,9 @@ static void gfxh_cleanup(void)
 	draw_destroy_context();
 	cairo_surface_destroy(board.surface);
 	pthread_mutex_unlock(&hctx->xlock);
+
+	if (close(fopp) == -1)
+		fprintf(stderr, "error while closing communication socket, possible data loss\n");
 
 	pthread_mutex_lock(&hctx->mainlock);
 	hctx->terminate = 1;
@@ -388,6 +446,7 @@ void *gfxh_main(void *args)
 	dpy = a->dpy;
 	winmain = a->winmain;
 	vis = a->vis;
+	fopp = a->fopp;
 	gamecolor = a->gamecolor;
 	free(a);
 

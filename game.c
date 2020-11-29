@@ -675,7 +675,6 @@ int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece)
 		return -1;
 	}
 	move(ifrom, jfrom, ito, jto, hints, m);
-	print_move(m);
 
 	fid iking, jking;
 	get_king(playing_color, &iking, &jking);

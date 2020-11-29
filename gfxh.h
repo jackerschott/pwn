@@ -31,6 +31,7 @@ struct gfxh_args_t {
 	Display *dpy;
 	Window winmain;
 	Visual *vis;
+	int fopp;
 	color_t gamecolor;
 };
 

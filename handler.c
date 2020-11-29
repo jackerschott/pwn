@@ -25,12 +25,17 @@ int hread(int fd, void *buf, size_t size)
 {
 	char *b = (char *)buf;
 	while (size > 0) {
-		size_t n;
-		do {
-			n = read(fd, b, size);
-		} while ((n == -1) && (errno == EINTR));
-		if (n == -1)
+		size_t n = read(fd, b, size);
+		if (n == -1) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EWOULDBLOCK || errno == EAGAIN)
+				return 2;
 			return -1;
+		} else if (n == 0) {
+			return 1;
+		}
+
 		b += n;
 		size -= n;
 	}
@@ -40,12 +45,54 @@ int hwrite(int fd, void *buf, size_t size)
 {
 	char *b = (char *)buf;
 	while (size > 0) {
-		size_t n;
-		do {
-			n = write(fd, b, size);
-		} while ((n == -1) && (errno == EINTR));
-		if (n == -1)
+		size_t n = write(fd, b, size);
+		if (n == -1) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EWOULDBLOCK || errno == EAGAIN)
+				continue;
 			return -1;
+		}
+
+		b += n;
+		size -= n;
+	}
+	return 0;
+}
+
+int hsend(int fd, void *buf, size_t size)
+{
+	char *b = (char *)buf;
+	while (size > 0) {
+		size_t n = send(fd, b, size, 0);
+		if (n == -1) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EWOULDBLOCK || errno == EAGAIN)
+				continue;
+			return -1;
+		}
+
+		b += n;
+		size -= n;
+	}
+	return 0;
+}
+int hrecv(int fd, void *buf, size_t size)
+{
+	char *b = (char *)buf;
+	while (size > 0) {
+		size_t n = recv(fd, b, size, 0);
+		if (n == -1) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EWOULDBLOCK || errno == EAGAIN)
+				return 2;
+			return -1;
+		} else if (n == 0) {
+			return 1;
+		}
+
 		b += n;
 		size -= n;
 	}

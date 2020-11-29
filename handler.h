@@ -25,15 +25,18 @@
 #include "pwn.h"
 
 /* handler definitions */
+#define HANDLER_STACKSIZE (4096 * 64)
+
 enum {
 	EVENT_REDRAW,
 	EVENT_TOUCH,
 	EVENT_PLAYMOVE,
+	EVENT_UPDATETIME,
 	EVENT_SENDMOVE,
 	EVENT_RECVMOVE,
-	EVENT_TERM,
 };
 enum {
+	TOUCH_PRESS = 0,
 	TOUCH_RELEASE = 1,
 };
 
@@ -48,49 +51,38 @@ struct event_touch {
 	long ttouch;
 	int flags;
 };
-struct event_passmove {
+struct event_playmove {
 	char type;
 	fid from[2];
 	fid to[2];
 	long tmove;
 };
-struct event_term {
+struct event_updatetime {
 	char type;
 };
 union event_t {
 	char type;
 	struct event_redraw redraw;
 	struct event_touch touch;
-	struct event_passmove playmove;
-	struct event_passmove sendmove;
-	struct event_passmove recvmove;
-	struct event_term term;
+	struct event_playmove playmove;
+	struct event_updatetime updatetime;
+	//struct event_playmove sendmove;
+	//struct event_playmove recvmove;
 };
 
-struct eventhandler_t {
+struct handler_t {
+	pthread_t id;
 	int pevent[2];
 	int pconfirm[2];
 	int state;
 };
 
 struct handler_context_t {
-	struct {
-		pthread_t id;
-		int pevent[2];
-		int pconfirm[2];
-		int state;
-	} gfxh;
-	struct {
-		pthread_t id;
-		int pevent[2];
-		int pconfirm[2];
-		int state;
-	} comh;
+	struct handler_t gfxh;
 
 	pthread_mutex_t gamelock;
 	pthread_mutex_t xlock;
 	pthread_mutex_t gfxhlock;
-	pthread_mutex_t comhlock;
 	pthread_mutex_t mainlock;
 
 	int terminate;
@@ -98,5 +90,8 @@ struct handler_context_t {
 
 int hread(int fd, void *buf, size_t size);
 int hwrite(int fd, void *buf, size_t size);
+
+int hsend(int fd, void *buf, size_t size);
+int hrecv(int fd, void *buf, size_t size);
 
 #endif /* HANDLER_H */
