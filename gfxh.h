@@ -20,7 +20,75 @@
 #define GFXH_H
 
 #include "pwn.h"
-#include "handler.h"
+
+#define GFXH_STACKSIZE (4096 * 64)
+
+enum {
+	EVENT_CLIENTMESSAGE,
+	EVENT_REDRAW,
+	EVENT_TOUCH,
+	EVENT_KEYTOUCH,
+	EVENT_PLAYMOVE,
+};
+enum {
+	TOUCH_PRESS = 0,
+	TOUCH_RELEASE = 1,
+};
+struct event_clientmessage {
+	int type;
+	union {
+		char b[20];
+		short s[10];
+		long l[5];
+	} data;
+};
+struct event_redraw {
+	int type;
+	int width, height;
+};
+struct event_touch {
+	int type;
+	int x;
+	int y;
+	int flags;
+};
+struct event_playmove {
+	int type;
+	fid from[2];
+	fid to[2];
+	long tmove;
+};
+union event_t {
+	int type;
+	struct event_redraw redraw;
+	struct event_touch touch;
+	struct event_playmove playmove;
+	struct event_clientmessage clientmessage;
+};
+
+struct handler_t {
+	pthread_t id;
+	int pevent[2];
+	int pconfirm[2];
+	int state;
+};
+struct handler_context_t {
+	struct handler_t gfxh;
+
+	pthread_mutex_t gamelock;
+	pthread_mutex_t xlock;
+	pthread_mutex_t gfxhlock;
+	pthread_mutex_t mainlock;
+
+	int terminate;
+};
+
+enum {
+	ATOM_DELETE_WINDOW,
+	ATOM_NAME,
+	ATOM_ICON_NAME,
+	ATOM_COUNT
+};
 
 enum {
 	GFXH_IS_DRAWING = 1,
@@ -31,9 +99,15 @@ struct gfxh_args_t {
 	Display *dpy;
 	Window winmain;
 	Visual *vis;
+	Atom atoms[ATOM_COUNT];
 	int fopp;
 	color_t gamecolor;
+	long gametime;
 };
+
+
+int hread(int fd, void *buf, size_t size);
+int hwrite(int fd, void *buf, size_t size);
 
 void *gfxh_main(void *args);
 

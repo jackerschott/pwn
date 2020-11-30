@@ -33,10 +33,9 @@ int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece);
 void game_undo_move(moveinfo_t *m);
 
 int game_is_movable_piece_at(fid i, fid j);
-int game_is_stalemate(void);
-int game_is_checkmate(void);
+status_t game_get_status(int timeout);
 
-color_t game_get_playing_color(void);
+color_t game_get_moving_color(void);
 piece_t game_get_piece(fid i, fid j);
 color_t game_get_color(fid i, fid j);
 fieldinfo_t game_get_fieldinfo(fid i, fid j);

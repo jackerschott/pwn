@@ -134,7 +134,7 @@ static int (*is_possible_move[NUM_PIECES])(fid, fid, fid, fid, int *) = {
 	is_possible_pawn_move,
 };
 
-static color_t playing_color;
+static color_t moving_color;
 static fieldinfo_t board[NF][NF];
 static fid updates[NUM_UPDATES_MAX][2];
 
@@ -453,7 +453,7 @@ static void undo_move(moveinfo_t *m)
 	updates[1][1] = m->jfrom;
 
 	if (!(m->hints & HINT_EN_PASSANT)) {
-		board[m->ito][m->jto] = m->taken | OPP_COLOR(playing_color);
+		board[m->ito][m->jto] = m->taken | OPP_COLOR(moving_color);
 		updates[0][0] = m->ito;
 		updates[0][1] = m->jto;
 	} 
@@ -491,7 +491,7 @@ static int is_king_in_check(color_t c, fid iking, fid jking)
 
 /* possible = Move is allowed even if king is in check after
    legal = Move is allowed, king is not in check after */
-static int has_legal_move(fid ipiece, fid jpiece)
+static int piece_has_legal_move(fid ipiece, fid jpiece)
 {
 	piece_t p = board[ipiece][jpiece] & PIECEMASK;
 	color_t c = board[ipiece][jpiece] & COLORMASK;
@@ -519,6 +519,19 @@ static int has_legal_move(fid ipiece, fid jpiece)
 
 			undo_move(&m);
 			if (!check)
+				return 1;
+		}
+	}
+	return 0;
+}
+static int has_legal_move(color_t color)
+{
+	for (fid j = 0; j < NF; ++j) {
+		for (fid i = 0; i < NF; ++i) {
+			if ((board[i][j] & PIECEMASK) == PIECE_NONE
+					|| (board[i][j] & COLORMASK) != color)
+				continue;
+			if (piece_has_legal_move(i, j))
 				return 1;
 		}
 	}
@@ -581,7 +594,7 @@ int prompt_promotion_piece(void)
 			close(fans[0]);
 			return -1;
 		}
-		for (int i = 2; i < ARRSIZE(piece_names) - 1; ++i) {
+		for (int i = 2; i < ARRNUM(piece_names) - 1; ++i) {
 			if (write(fopts[1], "\n", 1) == -1) {
 				SYSERR();
 				close(fopts[1]);
@@ -607,7 +620,7 @@ int prompt_promotion_piece(void)
 	}
 
 	int i = -1;
-	for (i = 1; i < ARRSIZE(piece_names) - 1; ++i) {
+	for (i = 1; i < ARRNUM(piece_names) - 1; ++i) {
 		if (strncmp(name, piece_names[i], strlen(piece_names[i])) == 0)
 			break;
 	}
@@ -619,7 +632,7 @@ int prompt_promotion_piece(void)
 
 void game_init_board(void)
 {
-	playing_color = COLOR_WHITE;
+	moving_color = COLOR_WHITE;
 
 	fid pawnrows[2];
 	fid piecerows[2];
@@ -659,7 +672,7 @@ void game_terminate(void)
 int game_is_movable_piece_at(fid i, fid j)
 {
 	return ((board[i][j] & PIECEMASK) != PIECE_NONE)
-		&& (board[i][j] & COLORMASK) == playing_color;
+		&& (board[i][j] & COLORMASK) == moving_color;
 }
 int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece)
 {
@@ -677,8 +690,8 @@ int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece)
 	move(ifrom, jfrom, ito, jto, hints, m);
 
 	fid iking, jking;
-	get_king(playing_color, &iking, &jking);
-	if (is_king_in_check(playing_color, iking, jking)) {
+	get_king(moving_color, &iking, &jking);
+	if (is_king_in_check(moving_color, iking, jking)) {
 		undo_move(m);
 		free(m);
 		return 1;
@@ -694,10 +707,10 @@ int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece)
 			}
 		}
 
-		board[m->ito][m->jto] = playing_color | prompiece;
+		board[m->ito][m->jto] = moving_color | prompiece;
 	}
 
-	playing_color = OPP_COLOR(playing_color);
+	moving_color = OPP_COLOR(moving_color);
 	return 0;
 }
 void game_undo_last_move(void)
@@ -707,17 +720,17 @@ void game_undo_last_move(void)
 int game_is_stalemate(void)
 {
 	fid iking, jking;
-	get_king(playing_color, &iking, &jking);
+	get_king(moving_color, &iking, &jking);
 
-	if (is_king_in_check(playing_color, iking, jking))
+	if (is_king_in_check(moving_color, iking, jking))
 		return 0;
 
 	for (fid j = 0; j < NF; ++j) {
 		for (fid i = 0; i < NF; ++i) {
 			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & COLORMASK) != playing_color)
+					|| (board[i][j] & COLORMASK) != moving_color)
 				continue;
-			if (has_legal_move(i, j))
+			if (piece_has_legal_move(i, j))
 				return 0;
 		}
 	}
@@ -727,27 +740,51 @@ int game_is_stalemate(void)
 int game_is_checkmate(void)
 {
 	fid iking, jking;
-	get_king(playing_color, &iking, &jking);
+	get_king(moving_color, &iking, &jking);
 
-	if (!is_king_in_check(playing_color, iking, jking))
+	if (!is_king_in_check(moving_color, iking, jking))
 		return 0;
 
 	for (fid j = 0; j < NF; ++j) {
 		for (fid i = 0; i < NF; ++i) {
 			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & COLORMASK) != playing_color)
+					|| (board[i][j] & COLORMASK) != moving_color)
 				continue;
-			if (has_legal_move(i, j))
+			if (piece_has_legal_move(i, j))
 				return 0;
 		}
 	}
 
 	return 1;
 }
-
-color_t game_get_playing_color()
+status_t game_get_status(int timeout)
 {
-	return playing_color;
+	if (timeout) {
+		if (moving_color == COLOR_WHITE) {
+			return STATUS_BLACK_WON_TIMEOUT;
+		} else {
+			return STATUS_WHITE_WON_TIMEOUT;
+		}
+	}
+
+	if (!has_legal_move(moving_color)) {
+		fid iking, jking;
+		get_king(moving_color, &iking, &jking);
+
+		if (is_king_in_check(moving_color, iking, jking)) {
+			return moving_color ? STATUS_WHITE_WON_CHECKMATE
+				: STATUS_BLACK_WON_CHECKMATE;
+		} else {
+			return STATUS_DRAW_STALEMATE;
+		}
+	}
+
+	return moving_color ? STATUS_MOVE_BLACK : STATUS_MOVE_WHITE;
+}
+
+color_t game_get_moving_color()
+{
+	return moving_color;
 }
 piece_t game_get_piece(fid i, fid j)
 {
@@ -773,7 +810,7 @@ int game_save_board(const char *fname)
 		return -1;
 
 	write(fboard, board, NF * NF * sizeof(fieldinfo_t));
-	write(fboard, &playing_color, sizeof(color_t));
+	write(fboard, &moving_color, sizeof(color_t));
 	close(fboard);
 	return 0;
 }
@@ -784,7 +821,7 @@ int game_load_board(const char *fname)
 		return -1;
 
 	read(fboard, board, NF * NF * sizeof(fieldinfo_t));
-	read(fboard, &playing_color, sizeof(color_t));
+	read(fboard, &moving_color, sizeof(color_t));
 	close(fboard);
 
 	for (moveinfo_t *m = movelast; m; m = m->prev) {

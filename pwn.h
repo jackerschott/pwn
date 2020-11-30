@@ -27,7 +27,8 @@
 #include <cairo/cairo-xlib.h>
 
 /* generic macros */
-#define ARRSIZE(x) (sizeof(x) / sizeof((x)[0]))
+#define ARRNUM(x) (sizeof(x) / sizeof((x)[0]))
+#define STRLEN(x) (sizeof(x) - 1)
 #define BUG() do { \
 	fprintf(stderr, "BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
 	exit(EXIT_FAILURE); \
@@ -54,25 +55,61 @@
 #define NUM_PIECES 6
 #define NUM_COLORS 2
 
-#define PIECE_NONE 	0
-#define PIECE_KING 	2
-#define PIECE_QUEEN 	4
-#define PIECE_ROOK 	6
-#define PIECE_BISHOP 	8
-#define PIECE_KNIGHT 	10
-#define PIECE_PAWN 	12
-
-#define COLOR_WHITE 	0
-#define COLOR_BLACK 	1
-
-#define PIECEMASK 0b1110
-#define COLORMASK 0b0001
-
 #define OPP_COLOR(c) ((c) ^ COLORMASK)
 
-typedef char fid;
-typedef char piece_t;
-typedef char color_t;
-typedef char fieldinfo_t;
+#define COLORMASK 0b0001
+enum color_t {
+	COLOR_WHITE = 0,
+	COLOR_BLACK = 1,
+};
+#define PIECEMASK 0b1110
+enum piece_t {
+	PIECE_NONE = 0,
+	PIECE_KING = 2,
+	PIECE_QUEEN = 4,
+	PIECE_ROOK = 6,
+	PIECE_BISHOP = 8,
+	PIECE_KNIGHT = 10,
+	PIECE_PAWN = 12,
+};
+
+enum status_t {
+	STATUS_MOVE_WHITE,
+	STATUS_MOVE_BLACK,
+	STATUS_WHITE_WON_CHECKMATE,
+	STATUS_WHITE_WON_SURRENDER,
+	STATUS_WHITE_WON_TIMEOUT,
+	STATUS_BLACK_WON_CHECKMATE,
+	STATUS_BLACK_WON_SURRENDER,
+	STATUS_BLACK_WON_TIMEOUT,
+	STATUS_DRAW_MATERIAL,
+	STATUS_DRAW_STALEMATE,
+	STATUS_DRAW_REPETITION,
+	STATUS_DRAW_AGREEMENT,
+	STATUS_DRAW_TIMEOUT,
+};
+
+#define MSG_MAXLEN 49
+const static char *messages[] = {
+	"It is White to move",
+	"It is Black to move",
+	"White won by checkmate",
+	"Black surrendered",
+	"White won by timeout",
+	"Black won by checkmate",
+	"White surrendered",
+	"Black won by timeout",
+	"Draw by insufficient material",
+	"Draw by stalemate",
+	"Draw by threefold repetition",
+	"The players agreed to a draw",
+	"Draw by timeout with insufficient mating material",
+};
+
+typedef enum color_t color_t;
+typedef enum piece_t piece_t;
+typedef int fid;
+typedef int fieldinfo_t;
+typedef enum status_t status_t;
 
 #endif /* CHESS_H */

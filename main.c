@@ -19,6 +19,7 @@
 #define _GNU_SOURCE
 
 #include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,15 +46,13 @@ enum {
 struct {
 	color_t color;
 	char *node;
-	long tvgame;
+	long gametime;
 	int flags;
 } options;
 
 /* X11 */
 static Display *dpy;
 static Window winmain;
-enum { WMDeleteWindow, WMName, WMCount };
-static Atom atoms[WMCount];
 
 static struct handler_context_t *hctx;
 
@@ -92,7 +91,7 @@ static int start_handler(void *args, int state, void *(*main)(void *), struct ha
 	memcpy(h->pconfirm, pconfirm, 2 * sizeof(int));
 	h->state = state;
 
-	return start_thread(args, main, HANDLER_STACKSIZE, &h->id);
+	return start_thread(args, main, GFXH_STACKSIZE, &h->id);
 
 err_pthread:
 	close(h->pevent[0]);
@@ -112,68 +111,92 @@ static int stop_handler(struct handler_t *h)
 	if ((errno = pthread_join(h->id, NULL)))
 		ret = 1;
 
-	if (close(h->pevent[0]) == -1 || close(h->pconfirm[0]) == -1 || close(h->pconfirm[1]) == -1)
+	if (close(h->pconfirm[0]))
 		ret = 1;
 
 	return ret;
 }
 
+static void on_client_message(XClientMessageEvent *e)
+{
+	union event_t event;
+	memset(&event, 0, sizeof(event));
+	event.clientmessage.type = EVENT_CLIENTMESSAGE;
+	memcpy(&event.clientmessage.data, &e->data, sizeof(e->data));
+	int n = hwrite(hctx->gfxh.pevent[1], &event, sizeof(event));
+	if (n == -1) {
+		SYSERR();
+		cleanup();
+		exit(-1);
+	} else if (n == 1) {
+		return;
+	}
+}
 static void on_configure(XConfigureEvent *e)
 {
 	pthread_mutex_lock(&hctx->gfxhlock);
 	int isdrawing = hctx->gfxh.state & GFXH_IS_DRAWING;
 	pthread_mutex_unlock(&hctx->gfxhlock);
-	if (isdrawing)
+	if (isdrawing) {
 		return;
+	}
 
-	union event_t event = {0};
+	union event_t event;
+	memset(&event, 0, sizeof(event));
 	event.redraw.type = EVENT_REDRAW;
 	event.redraw.width = e->width;
 	event.redraw.height = e->height;
-	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
+	int n = hwrite(hctx->gfxh.pevent[1], &event, sizeof(event));
+	if (n == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
+	} else if (n == 1) {
+		return;
 	}
 
 	int res;
-	if (hread(hctx->gfxh.pconfirm[0], &res, sizeof(res)) == -1) {
+	n = hread(hctx->gfxh.pconfirm[0], &res, sizeof(res));
+	if (n == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
+	} else if (n == 1) {
+		return;
 	}
-}
-static void on_client_message(XClientMessageEvent *e)
-{
-	pthread_mutex_lock(&hctx->mainlock);
-	if ((Atom)e->data.l[0] == atoms[WMDeleteWindow])
-		hctx->terminate = 1;
-	pthread_mutex_unlock(&hctx->mainlock);
 }
 static void on_button_press(XButtonEvent *e)
 {
 	union event_t event;
+	memset(&event, 0, sizeof(event));
 	event.touch.type = EVENT_TOUCH;
 	event.touch.x = e->x;
 	event.touch.y = e->y;
 	event.touch.flags = TOUCH_PRESS;
-	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
+	int n = hwrite(hctx->gfxh.pevent[1], &event, sizeof(event));
+	if (n == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
+	} else if (n == 1) {
+		return;
 	}
 }
 static void on_button_release(XButtonEvent *e)
 {
 	union event_t event;
+	memset(&event, 0, sizeof(event));
 	event.touch.type = EVENT_TOUCH;
 	event.touch.x = e->x;
 	event.touch.y = e->y;
 	event.touch.flags = TOUCH_RELEASE;
-	if (hwrite(hctx->gfxh.pevent[1], &event, sizeof(event)) == -1) {
+	int n = hwrite(hctx->gfxh.pevent[1], &event, sizeof(event));
+	if (n == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
+	} else if (n == 1) {
+		return;
 	}
 }
 static void on_keypress(XKeyEvent *e)
@@ -262,7 +285,7 @@ err_invalidarg:
 static void parse_options(int argc, char *argv[])
 {
 	options.node = NULL;
-	options.tvgame = 0;
+	options.gametime = 0;
 	options.color = -1;
 
 	char key = 0;
@@ -417,8 +440,6 @@ static void setup(void)
 		exit(-1);
 	}
 
-	game_init_board();
-
 	/* setup X */
 	dpy = XOpenDisplay(NULL);
 	if (!dpy) {
@@ -443,9 +464,11 @@ static void setup(void)
 	XSelectInput(dpy, winmain, mask);
 	XMapWindow(dpy, winmain);
 
-	atoms[WMDeleteWindow] = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+	Atom atoms[ATOM_COUNT];
+	atoms[ATOM_DELETE_WINDOW] = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+	atoms[ATOM_NAME] = XInternAtom(dpy, "_NET_WM_NAME", False);
 
-	XSetWMProtocols(dpy, winmain, &atoms[WMDeleteWindow], 1);
+	XSetWMProtocols(dpy, winmain, &atoms[ATOM_DELETE_WINDOW], 1);
 
 	/* setup handlers */
 	hctx = malloc(sizeof(*hctx));
@@ -471,8 +494,10 @@ static void setup(void)
 	gfxhargs->dpy = dpy;
 	gfxhargs->winmain = winmain;
 	gfxhargs->vis = vis;
+	memcpy(gfxhargs->atoms, atoms, sizeof(atoms));
 	gfxhargs->fopp = fopp;
 	gfxhargs->gamecolor = options.color;
+	gfxhargs->gametime = options.gametime;
 	if (start_handler(gfxhargs, 0, gfxh_main, &hctx->gfxh)) {
 		fprintf(stderr, "error while starting graphics handler thread");
 		free(gfxhargs);
@@ -503,7 +528,6 @@ static void cleanup(void)
 	XUnmapWindow(dpy, winmain);
 	XDestroyWindow(dpy, winmain);
 	XCloseDisplay(dpy);
-	game_terminate();
 }
 static void run(void)
 {
@@ -525,10 +549,10 @@ static void run(void)
 		XNextEvent(dpy, &ev);
 		pthread_mutex_unlock(&hctx->xlock);
 
-		if (ev.type == ConfigureNotify) {
-			on_configure(&ev.xconfigure);
-		} else if (ev.type == ClientMessage) {
+		if (ev.type == ClientMessage) {
 			on_client_message(&ev.xclient);
+		} else if (ev.type == ConfigureNotify) {
+			on_configure(&ev.xconfigure);
 		} else if (ev.type == ButtonPress) {
 			on_button_press(&ev.xbutton);
 		} else if (ev.type == ButtonRelease) {
@@ -541,6 +565,13 @@ static void run(void)
 int main(int argc, char *argv[])
 {
 	parse_options(argc, argv);
+	options.gametime = 15L * 1000L * 1000L * 1000L;
+
+	struct sigaction sa;
+	sa.sa_handler = SIG_IGN;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	sigaction(SIGPIPE, &sa, NULL);
 
 	//if (argc > 1) {
 	//	if (game_load_board(argv[1])) {
@@ -550,7 +581,6 @@ int main(int argc, char *argv[])
 	//} else {
 	//	game_init_board(player_color);
 	//}
-
 
 	setup();
 	run();
