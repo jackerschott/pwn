@@ -26,6 +26,7 @@
 #include <pthread.h>
 #include <X11/Xlib.h>
 
+#include "config.h"
 #include "draw.h"
 #include "game.h"
 
@@ -166,13 +167,132 @@ int hrecv(int fd, void *buf, size_t size)
 	return 0;
 }
 
-long gettimepoint(void)
+static int prompt_promotion_piece(piece_t *p)
+{
+	char name[PIECENAME_BUF_SIZE];
+
+	int fopts[2];
+	int fans[2];
+	if (pipe(fopts))
+		return -1;
+
+	if (pipe(fans)) {
+		SYSERR();
+		close(fopts[0]);
+		close(fopts[1]);
+		return -1;
+	}
+
+	pid_t pid = fork();
+	if (pid == -1) {
+		SYSERR();
+		close(fans[0]);
+		close(fans[1]);
+		close(fopts[0]);
+		close(fopts[1]);
+		return -1;
+	}
+	
+	if (pid == 0) {
+		close(fopts[1]);
+		close(fans[0]);
+
+		if (dup2(fopts[0], STDIN_FILENO) == -1) {
+			SYSERR();
+			close(fopts[0]);
+			close(fans[1]);
+			exit(-1);
+		}
+		if (dup2(fans[1], STDOUT_FILENO) == -1) {
+			SYSERR();
+			close(fopts[0]);
+			close(fans[1]);
+			exit(-1);
+		}
+
+		execvp(promotion_prompt_cmd[0], (char *const *)promotion_prompt_cmd);
+		SYSERR();
+		exit(-1);
+	} else {
+		close(fopts[0]);
+		close(fans[1]);
+
+		if (write(fopts[1], piece_names[1], strlen(piece_names[1])) == -1) {
+			SYSERR();
+			close(fopts[1]);
+			close(fans[0]);
+			return -1;
+		}
+		for (int i = 2; i < ARRNUM(piece_names) - 1; ++i) {
+			if (write(fopts[1], "\n", 1) == -1) {
+				SYSERR();
+				close(fopts[1]);
+				close(fans[0]);
+				return -1;
+			}
+			if (write(fopts[1], piece_names[i], strlen(piece_names[i])) == -1) {
+				SYSERR();
+				close(fopts[1]);
+				close(fans[0]);
+				return -1;
+			}
+		}
+		close(fopts[1]);
+
+		int n;
+		if ((n = read(fans[0], name, PIECENAME_BUF_SIZE - 1)) == -1) {
+			SYSERR();
+			close(fans[0]);
+			return -1;
+		}
+		close(fans[0]);
+	}
+
+	printf("name: %s\n", name);
+	int i = 1;
+	for (; i < ARRNUM(piece_names) - 1; ++i) {
+		if (strncmp(name, piece_names[i], strlen(piece_names[i])) == 0)
+			break;
+	}
+	if (i == ARRNUM(piece_names) - 1)
+		return 1;
+
+	*p = PIECE_BY_IDX(i);
+	return 0;
+}
+static int move(fid from[2], fid to[2], piece_t *prompiece)
+{
+	*prompiece = PIECE_NONE;
+
+	pthread_mutex_lock(&hctx->gamelock);
+	int ret = game_move(from[0], from[1], to[0], to[1], 0);
+	pthread_mutex_unlock(&hctx->gamelock);
+	if (ret == -1 || ret == 1) {
+		return ret;
+	} else if (ret == 2) {
+		ret = prompt_promotion_piece(prompiece);
+		if (ret == -1)
+			return -1;
+		if (ret == 1)
+			return 2;
+
+		pthread_mutex_lock(&hctx->gamelock);
+		ret = game_move(from[0], from[1], to[0], to[1], *prompiece);
+		pthread_mutex_unlock(&hctx->gamelock);
+		if (ret == -1)
+			return -1;
+	}
+
+	return 0;
+}
+
+static long gettimepoint(void)
 {
 	struct timespec tp;
 	clock_gettime(CLOCK_MONOTONIC, &tp);
 	return tp.tv_sec * SECOND + tp.tv_nsec;
 }
-void format_gametime(long t, char *str)
+static void format_gametime(long t, char *str)
 {
 	int h = t / (SECOND * 3600);
 	int m = t / (SECOND * 60) - 60 * h;
@@ -180,7 +300,7 @@ void format_gametime(long t, char *str)
 
 	sprintf(str, "%i:%.2i:%.2i", h, m, s);
 }
-void show_status(struct gameinfo_t ginfo)
+static void show_status(struct gameinfo_t ginfo)
 {
 	char title[TITLE_MAXLEN + 1];
 	format_gametime(ginfo.tiself.total, title);
@@ -399,28 +519,33 @@ static void handle_touch(struct event_touch *e)
 
 	fid f[2] = { XTOI(e->x, board.xorig, board.fieldsize),
 		YTOJ(e->y, board.yorig, board.fieldsize, gameinfo.selfcolor)};
+	if (e->flags & TOUCH_RELEASE && (selfield[0] == -1 || memcmp(f, selfield, sizeof(f)) == 0))
+		return;
 
 	pthread_mutex_lock(&hctx->gamelock);
 	int targetspiece = game_is_movable_piece_at(f[0], f[1]);
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (targetspiece) {
-		if (memcmp(f, selfield, 2 * sizeof(fid)) == 0) {
-			if (!(e->flags & TOUCH_RELEASE))
-				unselectf();
-		} else if (selfield[0] == -1) {
-			if (!(e->flags & TOUCH_RELEASE))
-				selectf(f);
-		} else {
+		if (memcmp(f, selfield, 2 * sizeof(fid)) == 0) { /* unselect piece */
+			unselectf();
+		} else if (selfield[0] == -1) { /* select piece */
+			selectf(f);
+		} else { /* switch selection over to piece */
 			unselectf();
 			if (!(e->flags & TOUCH_RELEASE))
 				selectf(f);
 		}
 	} else if (selfield[0] != -1) {
-		pthread_mutex_lock(&hctx->gamelock);
-		int err = game_move(selfield[0], selfield[1], f[0], f[1], 0);
-		pthread_mutex_unlock(&hctx->gamelock);
-		if (err)
+		piece_t prompiece;
+		int ret = move(selfield, f, &prompiece);
+		if (ret == -1) {
+			SYSERR();
+			gfxh_cleanup();
+			pthread_exit(NULL);
+		} else if (ret == 1 || ret == 2) {
+			unselectf();
 			return;
+		}
 
 		long tp = gettimepoint();
 
@@ -429,6 +554,7 @@ static void handle_touch(struct event_touch *e)
 		event.playmove.type = EVENT_PLAYMOVE;
 		memcpy(event.playmove.from, selfield, sizeof(selfield));
 		memcpy(event.playmove.to, f, sizeof(f));
+		event.playmove.prompiece = prompiece;
 		event.playmove.tmove = tp;
 		int n = hsend(foppt, &event, sizeof(event));
 		if (n == -1) {
@@ -463,9 +589,20 @@ static void handle_touch(struct event_touch *e)
 }
 static void handle_playmove(struct event_playmove *e)
 {
+	//printf("move: { type: %i, from: {%i, %i}, to: {%i, %i}, time: %li }\n",
+	//		e->type, e->from[0], e->from[1], e->to[0], e->to[1], e->tmove);
+
+	pthread_mutex_lock(&hctx->gamelock);
+	int err = game_move(e->from[0], e->from[1], e->to[0], e->to[1], e->prompiece);
+	pthread_mutex_unlock(&hctx->gamelock);
+	if (err == -1) {
+		SYSERR();
+		gfxh_cleanup();
+		pthread_exit(NULL);
+	}
+
 	pthread_mutex_lock(&hctx->gamelock);
 	fid updates[NUM_UPDATES_MAX][2];
-	game_move(e->from[0], e->from[1], e->to[0], e->to[1], 0);
 	game_get_updates(updates);
 	pthread_mutex_unlock(&hctx->gamelock);
 	show(updates);
@@ -502,13 +639,13 @@ static void handle_updatetime(void)
 	if (tiplayer->total < 0) {
 		tiplayer->total = 0;
 		
-		if (selfield[0] != -1)
-			unselectf();
+		//if (selfield[0] != -1)
+		//	unselectf();
 
-		pthread_mutex_lock(&hctx->gamelock);
-		gameinfo.status = game_get_status(1);
-		pthread_mutex_unlock(&hctx->gamelock);
-		show_status(gameinfo);
+		//pthread_mutex_lock(&hctx->gamelock);
+		//gameinfo.status = game_get_status(1);
+		//pthread_mutex_unlock(&hctx->gamelock);
+		//show_status(gameinfo);
 	} else if (tp - tlastupdate >= SECOND) {
 		show_status(gameinfo);
 		tlastupdate = tp;
@@ -547,7 +684,7 @@ static void gfxh_setup(void)
 	board.size = wa.width;
 	board.fieldsize = wa.height / NF;
 
-	game_init_board();
+	game_init_test_board();
 
 	gameinfo.tiself.movestart = -1;
 	gameinfo.tiself.total = gameinfo.tiself.subtotal;

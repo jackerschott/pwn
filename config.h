@@ -19,6 +19,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define PORTSTR "3523"
+#define PORTSTR "5000"
+
+static const char *promotion_prompt_cmd[] = { "dmenu", "-p", "promote to:" };
 
 #endif /* CONFIG_H */

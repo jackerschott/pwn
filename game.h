@@ -44,4 +44,7 @@ void game_get_updates(fid u[][2]);
 int game_save_board(const char *fname);
 int game_load_board(const char *fname);
 
+/* debug */
+void print_board(void);
+
 #endif /* GAME_H */

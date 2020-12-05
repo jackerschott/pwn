@@ -213,6 +213,10 @@ static void on_keypress(XKeyEvent *e)
 		pthread_mutex_lock(&hctx->gamelock);
 		game_save_board("position");
 		pthread_mutex_unlock(&hctx->gamelock);
+	} else if (ksym == XK_b) {
+		pthread_mutex_lock(&hctx->gamelock);
+		print_board();
+		pthread_mutex_unlock(&hctx->gamelock);
 	}
 }
 
@@ -565,7 +569,7 @@ static void run(void)
 int main(int argc, char *argv[])
 {
 	parse_options(argc, argv);
-	options.gametime = 15L * 1000L * 1000L * 1000L;
+	options.gametime = 15L * 60L * 1000L * 1000L * 1000L;
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_IGN;

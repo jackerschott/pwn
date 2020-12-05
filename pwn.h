@@ -27,8 +27,13 @@
 #include <cairo/cairo-xlib.h>
 
 /* generic macros */
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define SGN(i) ((i > 0) - (i < 0))
+
 #define ARRNUM(x) (sizeof(x) / sizeof((x)[0]))
 #define STRLEN(x) (sizeof(x) - 1)
+
 #define BUG() do { \
 	fprintf(stderr, "BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
 	exit(EXIT_FAILURE); \
@@ -56,6 +61,8 @@
 #define NUM_COLORS 2
 
 #define OPP_COLOR(c) ((c) ^ COLORMASK)
+#define PIECE_IDX(p) ((p) / 2 - 1)
+#define PIECE_BY_IDX(i) (2 * (i) + 2)
 
 #define COLORMASK 0b0001
 enum color_t {
@@ -87,6 +94,7 @@ enum status_t {
 	STATUS_DRAW_REPETITION,
 	STATUS_DRAW_AGREEMENT,
 	STATUS_DRAW_TIMEOUT,
+	STATUS_DRAW_FIFTY_MOVES,
 };
 
 #define MSG_MAXLEN 49
@@ -104,6 +112,17 @@ const static char *messages[] = {
 	"Draw by threefold repetition",
 	"The players agreed to a draw",
 	"Draw by timeout with insufficient mating material",
+	"Draw by fifty consecutive moves wihout capture or pawn move",
+};
+
+#define PIECENAME_BUF_SIZE 16
+static const char *piece_names[] = {
+	"king",
+	"queen",
+	"rook",
+	"bishop",
+	"knight",
+	"pawn",
 };
 
 typedef enum color_t color_t;
