@@ -42,11 +42,14 @@
 /* options */
 enum {
 	OPTION_IS_SERVER = 1,
+	OPTION_NO_OPPONENT = 2,
 };
 struct {
 	color_t color;
 	char *node;
+	char *port;
 	long gametime;
+	long moveinc;
 	int flags;
 } options;
 
@@ -220,126 +223,6 @@ static void on_keypress(XKeyEvent *e)
 	}
 }
 
-static void free_options()
-{
-	free(options.node);
-}
-static void set_option(char key, const char *val)
-{
-	if (key == 'a') {
-		if (!val)
-			goto err_noarg;
-
-		char *node = malloc(strlen(val) + 1);
-		if (!node) {
-			SYSERR();
-			free_options();
-			exit(-1);
-		}
-		options.node = node;
-
-		strcpy(options.node, val);
-	} else if (key == 'c') {
-		if (!val)
-			goto err_noarg;
-
-		if (strcmp(val, "white") == 0) {
-			options.color = COLOR_WHITE;
-		} else if (strcmp(val, "black") == 0) {
-			options.color = COLOR_BLACK;
-		} else {
-			goto err_invalidarg;
-		}
-	} else if (key == 'l') {
-		if (!val)
-			goto err_noarg;
-
-		char *node = malloc(strlen(val) + 1);
-		if (!node) {
-			SYSERR();
-			free_options();
-			exit(-1);
-		}
-		options.node = node;
-
-		strcpy(options.node, val);
-		options.flags |= OPTION_IS_SERVER;
-	} else {
-		goto err_invalid;
-	}
-	return;
-
-err_invalid:
-	fprintf(stderr, "not a valid option: `-%c'", key);
-	free_options();
-	exit(1);
-err_noarg:
-	fprintf(stderr, "you have to specify an argument for `-%c'", key);
-	free_options();
-	exit(1);
-err_sparearg:
-	fprintf(stderr, "you cannot specify an argument for `-%c'", key);
-	free_options();
-	exit(1);
-err_invalidarg:
-	fprintf(stderr, "not a valid argument for the option `%c': `%s'", key, val);
-	free_options();
-	exit(1);
-}
-static void parse_options(int argc, char *argv[])
-{
-	options.node = NULL;
-	options.gametime = 0;
-	options.color = -1;
-
-	char key = 0;
-	char *val = NULL;
-	for (int i = 1; i < argc; ++i) {
-		if (argv[i][0] == '-') {
-			if (key) {
-				set_option(key, val);
-				key = 0;
-				val = NULL;
-			}
-
-			if (!argv[i][1]) {
-				fprintf(stderr, "not a valid argument: `%s'", argv[i]);
-				free_options();
-				exit(1);
-			}
-
-			key = argv[i][1];
-			size_t vallen = strlen(argv[i]) - 2;
-			if (vallen)
-				val = argv[i] + 2;
-		} else if (key && !val) {
-			size_t vallen = strlen(argv[i]) - 2;
-			if (vallen)
-				val = argv[i];
-		} else {
-			fprintf(stderr, "not a valid argument: `%s'", argv[i]);
-			free_options();
-			exit(1);
-		}
-	}
-	if (key && !val) {
-		fprintf(stderr, "you have to specify an argument for `-%c'", key);
-			free_options();
-		exit(1);
-	}
-
-	if (key && val)
-		set_option(key, val);
-
-	if ((options.flags & OPTION_IS_SERVER) && options.color == -1) {
-		unsigned int r;
-		if (getrandom(&r, sizeof(r), GRND_RANDOM) == -1) {
-			SYSERR();
-			exit(-1);
-		}
-		options.color = r % 2;
-	}
-}
 static int init_communication(int *fd, int *err)
 {
 	int fsock = socket(AF_INET, SOCK_STREAM, 0);
@@ -423,6 +306,194 @@ static int init_communication(int *fd, int *err)
 
 	*fd = fopp;
 	return 0;
+}
+
+/* debug */
+static void print_options(void)
+{
+	printf("options\n");
+	if (options.color == COLOR_WHITE) {
+		printf("\tcolor: white\n");
+	} else if (options.color == COLOR_BLACK) {
+		printf("\tcolor: black\n");
+	}
+
+	printf("\tnode: %s\n", options.node);
+	printf("\tport: %s\n", options.port);
+
+	const int SECOND = 1000L * 1000L * 1000L;
+	int h = options.gametime / (60L * 60L * SECOND);
+	int m = options.gametime / (60L * SECOND) - h * 60L;
+	int i = options.moveinc;
+	printf("\ttime: %i:%i+%i\n", h, m, i);
+
+	if (options.flags & OPTION_IS_SERVER) {
+		printf("\tis server\n");
+	} else if (options.flags & OPTION_NO_OPPONENT) {
+		printf("\tno opponent\n");
+	}
+}
+
+static int parse_gametime(const char *str, long *h, long *m, long *i)
+{
+	char *e;
+	*h = strtol(str, &e, 10);
+	if (*e != ':')
+		return 1;
+
+	*m = strtol(e + 1, &e, 10);
+	if (*e == '\0') {
+		*i = 0;
+		return 0;
+	}
+
+	if (*e != '+')
+		return 1;
+
+	*i = strtol(e + 1, &e, 10);
+	if (*e != '\0')
+		return 1;
+
+	return 0;
+}
+static void parse_options(int argc, char *argv[])
+{
+	int color = -1;
+	char *port = NULL;
+	char *node = NULL;
+	long gametime = 0;
+	long moveinc = 0;
+	int flags = 0;
+
+	/* check for option combination */
+	char optstr[sizeof(":l:p:s:t:")] = "\0";
+	for (int i = 1; i < argc; ++i) {
+		if (strstr(argv[i], "-n") != NULL) {
+			strcpy(optstr, ":ns:");
+		} else if (strstr(argv[i], "-c") != NULL) {
+			strcpy(optstr, ":c:");
+		} else if (strstr(argv[i], "-l") != NULL) {
+			strcpy(optstr, ":l:p:s:t:");
+		} else {
+			continue;
+		}
+		break;
+	}
+	if (optstr[0] == 0) {
+		strcpy(optstr, ":s:");
+		flags = OPTION_NO_OPPONENT;
+	}
+
+	/* get options */
+	int c = getopt(argc, argv, optstr);
+	for (; c != -1; c = getopt(argc, argv, optstr)) {
+		switch (c) {
+		case 'n':
+			flags |= OPTION_NO_OPPONENT;
+			break;
+		case 'l':
+			flags |= OPTION_IS_SERVER;
+		case 'c':
+			node = malloc(strlen(optarg) + 1);
+			if (!node)
+				goto err_malloc;
+
+			strcpy(node, optarg);
+			break;
+		case 'p':
+			port = malloc(strlen(optarg) + 1);
+			if (!port)
+				goto err_malloc;
+
+			strcpy(port, optarg);
+			break;
+		case 's':
+			if (strcmp(optarg, "white") == 0) {
+				color = COLOR_WHITE;
+			} else if (strcmp(optarg, "black") == 0) {
+				color = COLOR_BLACK;
+			} else {
+				goto err_invalid_arg;
+			}
+			break;
+		case 't': {
+			long h, m, i;
+			int err = parse_gametime(optarg, &h, &m, &i);
+			if (err)
+				goto err_invalid_arg;
+			if (h < 0 || h > 10)
+				goto err_invalid_arg;
+			if (m < 0 || m > 60)
+				goto err_invalid_arg;
+			if (i < 0 || i > 60)
+				goto err_invalid_arg;
+			if (h == 10 && m != 0)
+				goto err_invalid_arg;
+
+			gametime = (h * 60L + m) * 60L * 1000L * 1000L * 1000L;
+			moveinc = i;
+			break;
+		}
+		case '?':
+			goto err_invalid_opt;
+		case ':':
+			goto err_missing_arg;
+		}
+	} 
+
+	/* check options */
+	if (flags & OPTION_IS_SERVER && !port) {
+		fprintf(stderr, "missing option '-p'\n");
+		free(node);
+		free(port);
+		exit(1);
+	}
+
+	/* set options */
+	if (color != -1) {
+		options.color = color;
+	} else if (flags & OPTION_NO_OPPONENT) {
+		options.color = COLOR_WHITE;
+	} else {
+		unsigned int r;
+		if (getrandom(&r, sizeof(r), GRND_RANDOM) == -1) {
+			SYSERR();
+			exit(-1);
+		}
+		options.color = r % 2;
+	}
+	options.node = node;
+	options.port = port;
+	options.gametime = gametime;
+	options.moveinc = moveinc;
+	options.flags = flags;
+	return;
+
+err_malloc:
+	SYSERR();
+	free(node);
+	free(port);
+	exit(-1);
+err_invalid_opt:
+	fprintf(stderr, "invalid option '-%c'\n", optopt);
+	free(node);
+	free(port);
+	exit(1);
+err_missing_arg:
+	fprintf(stderr, "missing argument for option '-%c'\n", optopt);
+	free(node);
+	free(port);
+	exit(1);
+err_invalid_arg:
+	fprintf(stderr, "invalid argument '%s' for option '-%c'\n", optarg, c);
+	free(node);
+	free(port);
+	exit(1);
+}
+static void free_options()
+{
+	free(options.node);
+	free(options.port);
 }
 
 static void setup(void)
@@ -532,6 +603,8 @@ static void cleanup(void)
 	XUnmapWindow(dpy, winmain);
 	XDestroyWindow(dpy, winmain);
 	XCloseDisplay(dpy);
+
+	free_options();
 }
 static void run(void)
 {
@@ -569,7 +642,6 @@ static void run(void)
 int main(int argc, char *argv[])
 {
 	parse_options(argc, argv);
-	options.gametime = 15L * 60L * 1000L * 1000L * 1000L;
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_IGN;
