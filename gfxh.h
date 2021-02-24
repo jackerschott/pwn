@@ -54,6 +54,7 @@ struct event_touch {
 };
 struct event_playmove {
 	int type;
+	piece_t piece;
 	fid from[2];
 	fid to[2];
 	piece_t prompiece;
@@ -101,14 +102,13 @@ struct gfxh_args_t {
 	Window winmain;
 	Visual *vis;
 	Atom atoms[ATOM_COUNT];
-	int fopp;
-	color_t gamecolor;
-	long gametime;
 };
-
 
 int hread(int fd, void *buf, size_t size);
 int hwrite(int fd, void *buf, size_t size);
+
+void init_communication_server(const char* node, color_t color, long gametime);
+void init_communication_client(const char *node);
 
 void *gfxh_main(void *args);
 

@@ -16,11 +16,19 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#define _XOPEN_SOURCE 700
+#define _DEFAULT_SOURCE
+
+#include <assert.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
+
+#include <arpa/inet.h>
+#include <netdb.h>
 
 #include <cairo/cairo-xlib.h>
 #include <pthread.h>
@@ -29,26 +37,31 @@
 #include "config.h"
 #include "draw.h"
 #include "game.h"
+#include "notation.h"
 
 #include "gfxh.h"
 
 #define FIGURE(p) ((p) / 2 - 1)
 #define PALETTE(c) (c)
-#define XTOI(x, xorig, fieldsize) ((int)(((x) - xorig) / fieldsize))
+#define XTOI(x, xorig, fieldsize, c) \
+	((1 - (c)) * (int)(((x) - xorig) / fieldsize) \
+	+ (c) * (NF - (int)(((x) - xorig) / fieldsize) - 1))
 #define YTOJ(y, yorig, fieldsize, c) \
 	((1 - c) * ((NF - 1) - (int)(((y) - yorig) / fieldsize)) \
 	+ (c) * (int)(((y) - yorig) / fieldsize))
-#define ITOX(i, xorig, fieldsize) (xorig + (i) * fieldsize)
+#define ITOX(i, xorig, fieldsize, c) \
+	(xorig + ((1 - (c)) * (i) + (c) * (NF - (i) - 1)) * fieldsize)
 #define JTOY(j, yorig, fieldsize, c) \
-	(yorig + ((1 - c) * ((NF - 1) - (j)) + (c) * (j)) * fieldsize)
+	(yorig + ((1 - (c)) * (NF - (j) - 1) + (c) * (j)) * fieldsize)
 
-#define SECOND (1000L * 1000L * 1000L)
-#define TIMESTRLEN 7
-#define TITLE_MAXLEN (TIMESTRLEN + STRLEN(" - ") + TIMESTRLEN + MSG_MAXLEN)
+#define MAXLEN_INITTIMESTAMP (STRLEN("00:00:00 01/01/1970"))
+#define MAXLEN_INITCOLOR (MAX(STRLEN("white"), STRLEN("black")))
+#define MAXLEN_INITSTR (MAXLEN_INITCOLOR + STRLEN(" ") + MAXLEN_TIME_COARSE + STRLEN(" ") + MAXLEN_INITTIMESTAMP)
+#define MAXLEN_PLAYMOVE (MAXLEN_MOVE + MAXLEN_TIME + 1)
+#define BUFSIZE_PLAYMOVE 128
+#define TITLE_MAXLEN (MAXLEN_TIME_COARSE + STRLEN(" - ") + MAXLEN_TIME_COARSE + MSG_MAXLEN)
 
-#define RDIV(a, b) (((a) + ((b) - 1)) / (b))
-
-int foppt;
+int fopp;
 
 struct timeinfo_t {
 	long movestart;
@@ -58,11 +71,13 @@ struct timeinfo_t {
 struct gameinfo_t {
 	color_t selfcolor;
 	status_t status;
+	long time;
+	long tstart;
 	struct timeinfo_t tiself;
-	struct timeinfo_t tioppt;
+	struct timeinfo_t tiopp;
 };
-struct gameinfo_t gameinfo;
-long tlastupdate;
+struct gameinfo_t ginfo;
+long nupdates;
 
 static fid selfield[2];
 static struct {
@@ -94,8 +109,7 @@ int hread(int fd, void *buf, size_t size)
 		if (n == -1) {
 			if (errno == EINTR)
 				continue;
-			if (errno == EWOULDBLOCK || errno == EAGAIN)
-				return 2;
+			assert(errno != EWOULDBLOCK && errno != EAGAIN);
 			return -1;
 		} else if (n == 0) {
 			return 1;
@@ -114,10 +128,7 @@ int hwrite(int fd, void *buf, size_t size)
 		if (n == -1) {
 			if (errno == EINTR)
 				continue;
-			if (errno == EWOULDBLOCK || errno == EAGAIN)
-				continue;
-			if (errno == EPIPE)
-				return 1;
+			assert(errno != EPIPE && errno != EWOULDBLOCK && errno != EAGAIN);
 			return -1;
 		}
 
@@ -126,45 +137,202 @@ int hwrite(int fd, void *buf, size_t size)
 	}
 	return 0;
 }
-int hsend(int fd, void *buf, size_t size)
+int hrecv(int fd, char *buf, size_t size)
 {
-	char *b = (char *)buf;
-	while (size > 0) {
-		size_t n = send(fd, b, size, 0);
+	size_t sz = size;
+	char *b = buf;
+	while (sz > 0) {
+		size_t n = recv(fd, b, sz, 0);
 		if (n == -1) {
 			if (errno == EINTR)
 				continue;
 			if (errno == EWOULDBLOCK || errno == EAGAIN)
-				continue;
-			if (errno == EPIPE)
-				return 1;
-			return -1;
-		}
-
-		b += n;
-		size -= n;
-	}
-	return 0;
-}
-int hrecv(int fd, void *buf, size_t size)
-{
-	char *b = (char *)buf;
-	while (size > 0) {
-		size_t n = recv(fd, b, size, 0);
-		if (n == -1) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EWOULDBLOCK || errno == EAGAIN)
-				return 2;
+				return -2;
 			return -1;
 		} else if (n == 0) {
 			return 1;
 		}
 
+		if (b[n - 1] == '\n') {
+			b[n - 1] = '\0';
+			return 0;
+		}
+
+		b += n;
+		sz -= n;
+
+		//if (sz == 0) {
+		//	size_t newsz = sz + size;
+		//	void *newbuf = realloc(buf, newsz);
+		//	if (!newbuf)
+		//		return -1;
+		//	buf = newbuf;
+		//	b = buf + sz;
+		//}
+	}
+	return -3;
+}
+int hsend(int fd, char *buf)
+{
+	size_t size = strlen(buf) + 1;
+	buf[size - 1] = '\n';
+
+	char *b = buf;
+	while (size > 0) {
+		size_t n = send(fd, b, size, 0);
+		if (n == -1) {
+			if (errno == EINTR)
+				continue;
+			assert(errno != EPIPE && errno != EWOULDBLOCK && errno != EAGAIN);
+			return -1;
+		}
+
 		b += n;
 		size -= n;
 	}
 	return 0;
+}
+
+static void measure_game_start(struct tm *treal, long *tmono)
+{
+	/* measure game start in real and monotonic time */
+	struct timespec tsr, tsm;
+	clock_gettime(CLOCK_REALTIME, &tsr);
+	clock_gettime(CLOCK_MONOTONIC, &tsm);
+
+	gmtime_r(&tsr.tv_sec, treal);
+
+	/* correct for delay between tsr and tsm measurement */
+	*tmono = tsm.tv_sec * SECOND + tsm.tv_nsec - tsr.tv_nsec;
+}
+static long convert_game_start(struct tm *treal)
+{
+	struct timespec tsr, tsm;
+	clock_gettime(CLOCK_REALTIME, &tsr);
+	clock_gettime(CLOCK_MONOTONIC, &tsm);
+
+	long tstart = timegm(treal) * SECOND;
+	long tm = tsm.tv_sec * SECOND + tsm.tv_nsec;
+	long tr = tsr.tv_sec * SECOND + tsr.tv_nsec;
+	return tm - (tr - tstart);
+}
+static long measure_move_time(long tstart)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	long t = ts.tv_sec * SECOND + ts.tv_nsec;
+
+	return t - tstart;
+}
+
+static long gettimepoint(void)
+{
+	struct timespec tp;
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	return tp.tv_sec * SECOND + tp.tv_nsec;
+}
+
+void format_playmove(struct event_playmove *e, char *str)
+{
+	size_t l;
+	char *c = str;
+	format_move(e->piece, e->from, e->to, e->prompiece, str, &l);
+	c += l;
+
+	*c = ' ';
+	++c;
+
+	format_timeinterval(e->tmove, c, &l, 0);
+	c += l;
+
+	*c = '\0';
+}
+int parse_playmove(char *str, struct event_playmove *e)
+{
+	e->type = EVENT_PLAYMOVE;
+
+	char *c = strtok(str, " ");
+	if (c == NULL)
+		return 1;
+
+	if (parse_move(c, &e->piece, e->from, e->to, &e->prompiece))
+		return 1;
+
+	c = strtok(NULL, " ");
+	if (c == NULL) {
+		e->tmove = measure_move_time(ginfo.tiself.movestart);
+		return 0;
+	}
+
+	const char *end;
+	if (parse_time(c, &end, &e->tmove))
+		return 1;
+	if (*end != '\0')
+		return 1;
+
+	return 0;
+}
+int send_playmove(piece_t piece, fid from[2], fid to[2], piece_t prompiece, long tmove)
+{
+	union event_t e;
+	memset(&e, 0, sizeof(e));
+	e.playmove.type = EVENT_PLAYMOVE;
+	e.playmove.piece = piece;
+	memcpy(e.playmove.from, from, sizeof(e.playmove.from));
+	memcpy(e.playmove.to, to, sizeof(e.playmove.to));
+	e.playmove.prompiece = prompiece;
+	e.playmove.tmove = tmove;
+
+	char buf[MAXLEN_PLAYMOVE + 1];
+	format_playmove(&e.playmove, buf);
+
+	int err = hsend(fopp, buf);
+	if (err != 0)
+		return err;
+
+	return 0;
+}
+int recv_playmove(struct event_playmove *e)
+{
+	char buf[BUFSIZE_PLAYMOVE];
+	int err = hrecv(fopp, buf, BUFSIZE_PLAYMOVE);
+	if (err != 0)
+		return err;
+
+	if (parse_playmove(buf, e))
+		return 2;
+
+	return 0;
+}
+
+static void show_status(struct gameinfo_t ginfo)
+{
+	char title[TITLE_MAXLEN + 1];
+	char *c = title;
+
+	size_t len;
+	if (ginfo.time) {
+		format_timeinterval(ginfo.tiself.total, c, &len, 1);
+		c += len;
+
+		strncpy(c, " - ", STRLEN(" - "));
+		c += STRLEN(" - ");
+
+		format_timeinterval(ginfo.tiopp.total, c, &len, 1);
+		c += len;
+
+		*c = ' ';
+		++c;
+	}
+
+	len = strlen(messages[ginfo.status]);
+	strncpy(c, messages[ginfo.status], len);
+	c += len;
+	*c = '\0';
+
+	pthread_mutex_lock(&hctx->xlock);
+	XStoreName(dpy, winmain, title);
+	pthread_mutex_unlock(&hctx->xlock);
 }
 
 static int prompt_promotion_piece(piece_t *p)
@@ -260,9 +428,14 @@ static int prompt_promotion_piece(piece_t *p)
 	*p = PIECE_BY_IDX(i);
 	return 0;
 }
-static int move(fid from[2], fid to[2], piece_t *prompiece)
+static int move(fid from[2], fid to[2], piece_t *piece, piece_t *prompiece)
 {
 	*prompiece = PIECE_NONE;
+
+	pthread_mutex_lock(&hctx->gamelock);
+	piece_t p = game_get_piece(from[0], from[1]);
+	pthread_mutex_unlock(&hctx->gamelock);
+	*piece = p;
 
 	pthread_mutex_lock(&hctx->gamelock);
 	int ret = game_move(from[0], from[1], to[0], to[1], 0);
@@ -285,43 +458,14 @@ static int move(fid from[2], fid to[2], piece_t *prompiece)
 
 	return 0;
 }
-
-static long gettimepoint(void)
-{
-	struct timespec tp;
-	clock_gettime(CLOCK_MONOTONIC, &tp);
-	return tp.tv_sec * SECOND + tp.tv_nsec;
-}
-static void format_gametime(long t, char *str)
-{
-	int h = t / (SECOND * 3600);
-	int m = t / (SECOND * 60) - 60 * h;
-	int s = RDIV(t, SECOND) - 60 * m - 3600 * h;
-
-	sprintf(str, "%i:%.2i:%.2i", h, m, s);
-}
-static void show_status(struct gameinfo_t ginfo)
-{
-	char title[TITLE_MAXLEN + 1];
-	format_gametime(ginfo.tiself.total, title);
-	strcat(title, " - ");
-	format_gametime(ginfo.tioppt.total, title + strlen(title));
-	strcat(title, "  ");
-	strcat(title, messages[ginfo.status]);
-
-	pthread_mutex_lock(&hctx->xlock);
-	XStoreName(dpy, winmain, title);
-	pthread_mutex_unlock(&hctx->xlock);
-}
-
 static void selectf(fid f[2])
 {
 	pthread_mutex_lock(&hctx->xlock);
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
 
-	double fx = ITOX(f[0], board.xorig, board.fieldsize);
-	double fy = JTOY(f[1], board.yorig, board.fieldsize, gameinfo.selfcolor);
+	double fx = ITOX(f[0], board.xorig, board.fieldsize, ginfo.selfcolor);
+	double fy = JTOY(f[1], board.yorig, board.fieldsize, ginfo.selfcolor);
 	pthread_mutex_lock(&hctx->xlock);
 	draw_field(fx, fy, board.fieldsize, (f[0] + f[1]) % 2, 1);
 	pthread_mutex_unlock(&hctx->xlock);
@@ -351,8 +495,8 @@ static void unselectf(void)
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
 
-	double fx = ITOX(selfield[0], board.xorig, board.fieldsize);
-	double fy = JTOY(selfield[1], board.yorig, board.fieldsize, gameinfo.selfcolor);
+	double fx = ITOX(selfield[0], board.xorig, board.fieldsize, ginfo.selfcolor);
+	double fy = JTOY(selfield[1], board.yorig, board.fieldsize, ginfo.selfcolor);
 	pthread_mutex_lock(&hctx->xlock);
 	draw_field(fx, fy, board.fieldsize, (selfield[0] + selfield[1]) % 2, 0);
 	pthread_mutex_unlock(&hctx->xlock);
@@ -387,8 +531,8 @@ static void show(fid updates[][2])
 		int i = updates[k][0];
 		int j = updates[k][1];
 
-		double fx = ITOX(i, board.xorig, board.fieldsize);
-		double fy = JTOY(j, board.yorig, board.fieldsize, gameinfo.selfcolor);
+		double fx = ITOX(i, board.xorig, board.fieldsize, ginfo.selfcolor);
+		double fy = JTOY(j, board.yorig, board.fieldsize, ginfo.selfcolor);
 		pthread_mutex_lock(&hctx->xlock);
 		draw_field(fx, fy, board.fieldsize, (i + j) % 2, 0);
 		pthread_mutex_unlock(&hctx->xlock);
@@ -436,8 +580,8 @@ static void redraw(int width, int height)
 
 	for (int j = 0; j < NF; ++j) {
 		for (int i = 0; i < NF; ++i) {
-			double fx = ITOX(i, board.xorig, board.fieldsize);
-			double fy = JTOY(j, board.yorig, board.fieldsize, gameinfo.selfcolor);
+			double fx = ITOX(i, board.xorig, board.fieldsize, ginfo.selfcolor);
+			double fy = JTOY(j, board.yorig, board.fieldsize, ginfo.selfcolor);
 			int sel = i == selfield[0] && j == selfield[1];
 			pthread_mutex_lock(&hctx->xlock);
 			draw_field(fx, fy, board.fieldsize, (i + j) % 2, sel);
@@ -508,17 +652,19 @@ static void handle_redraw(struct event_redraw *e)
 }
 static void handle_touch(struct event_touch *e)
 {
-	if (gameinfo.status != STATUS_MOVE_WHITE && gameinfo.status != STATUS_MOVE_BLACK)
+	if (ginfo.status != STATUS_MOVE_WHITE && ginfo.status != STATUS_MOVE_BLACK)
 		return;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int isplaying = game_get_moving_color() == gameinfo.selfcolor;
+	int isplaying = game_get_moving_color() == ginfo.selfcolor;
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (!isplaying)
 		return;
 
-	fid f[2] = { XTOI(e->x, board.xorig, board.fieldsize),
-		YTOJ(e->y, board.yorig, board.fieldsize, gameinfo.selfcolor)};
+	fid f[2] = {
+		XTOI(e->x, board.xorig, board.fieldsize, ginfo.selfcolor),
+		YTOJ(e->y, board.yorig, board.fieldsize, ginfo.selfcolor)
+	};
 	if (e->flags & TOUCH_RELEASE && (selfield[0] == -1 || memcmp(f, selfield, sizeof(f)) == 0))
 		return;
 
@@ -536,62 +682,58 @@ static void handle_touch(struct event_touch *e)
 				selectf(f);
 		}
 	} else if (selfield[0] != -1) {
-		piece_t prompiece;
-		int ret = move(selfield, f, &prompiece);
-		if (ret == -1) {
+		piece_t piece, prompiece;
+		int err = move(selfield, f, &piece, &prompiece);
+		if (err == -1) {
 			SYSERR();
 			gfxh_cleanup();
 			pthread_exit(NULL);
-		} else if (ret == 1 || ret == 2) {
+		} else if (err == 1 || err == 2) {
 			unselectf();
 			return;
 		}
 
-		long tp = gettimepoint();
+		long tmove = measure_move_time(ginfo.tiself.movestart);
 
-		union event_t event;
-		memset(&event, 0, sizeof(event));
-		event.playmove.type = EVENT_PLAYMOVE;
-		memcpy(event.playmove.from, selfield, sizeof(selfield));
-		memcpy(event.playmove.to, f, sizeof(f));
-		event.playmove.prompiece = prompiece;
-		event.playmove.tmove = tp;
-		int n = hsend(foppt, &event, sizeof(event));
-		if (n == -1) {
+
+		err = send_playmove(piece, selfield, f, prompiece, tmove);
+		if (err == -1) {
 			SYSERR();
 			gfxh_cleanup();
 			pthread_exit(NULL);
-		} else if (n == 1) {
-			return;
 		}
 
+		/* show move */
 		pthread_mutex_lock(&hctx->gamelock);
 		fid updates[NUM_UPDATES_MAX][2];
 		game_get_updates(updates);
 		pthread_mutex_unlock(&hctx->gamelock);
-
 		unselectf();
 		show(updates);
 
+		/* let time run only after the first move by white */
+		long deduction = tmove;
 		pthread_mutex_lock(&hctx->gamelock);
-		gameinfo.status = game_get_status(0);
+		int nmove = game_get_move_number();
 		pthread_mutex_unlock(&hctx->gamelock);
-
-		if (gameinfo.tiself.movestart != -1) {
-			gameinfo.tiself.total = gameinfo.tiself.subtotal
-				- (tp - gameinfo.tiself.movestart);
-			gameinfo.tiself.subtotal = gameinfo.tiself.total;
+		if (nmove == 0 && ginfo.status == STATUS_MOVE_WHITE) {
+			deduction = 0;
 		}
-		gameinfo.tioppt.movestart = tp;
-		show_status(gameinfo);
-		tlastupdate = tp;
+
+		/* update status */
+		pthread_mutex_lock(&hctx->gamelock);
+		ginfo.status = game_get_status(0);
+		pthread_mutex_unlock(&hctx->gamelock);
+		ginfo.tiself.total = ginfo.tiself.subtotal - deduction;
+		ginfo.tiself.subtotal = ginfo.tiself.total;
+		ginfo.tiopp.movestart = ginfo.tiself.movestart + tmove;
+		show_status(ginfo);
+
+		nupdates = 0;
 	}
 }
 static void handle_playmove(struct event_playmove *e)
 {
-	//printf("move: { type: %i, from: {%i, %i}, to: {%i, %i}, time: %li }\n",
-	//		e->type, e->from[0], e->from[1], e->to[0], e->to[1], e->tmove);
-
 	pthread_mutex_lock(&hctx->gamelock);
 	int err = game_move(e->from[0], e->from[1], e->to[0], e->to[1], e->prompiece);
 	pthread_mutex_unlock(&hctx->gamelock);
@@ -607,48 +749,55 @@ static void handle_playmove(struct event_playmove *e)
 	pthread_mutex_unlock(&hctx->gamelock);
 	show(updates);
 
-	if (gameinfo.tioppt.movestart != -1) {
-		gameinfo.tioppt.total = gameinfo.tioppt.subtotal
-			- (e->tmove - gameinfo.tioppt.movestart);
-		gameinfo.tioppt.subtotal = gameinfo.tioppt.total;
+	/* let time run only after the first move by white */
+	long deduction = e->tmove;
+	pthread_mutex_lock(&hctx->gamelock);
+	int nmove = game_get_move_number();
+	pthread_mutex_unlock(&hctx->gamelock);
+	if (nmove == 0 && ginfo.status == STATUS_MOVE_WHITE) {
+		deduction = 0;
 	}
-	gameinfo.tiself.movestart = e->tmove;
+
+	ginfo.tiopp.total = ginfo.tiopp.subtotal - deduction;
+	ginfo.tiopp.subtotal = ginfo.tiopp.total;
+	ginfo.tiself.movestart = ginfo.tiopp.movestart + e->tmove;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	gameinfo.status = game_get_status(0);
+	ginfo.status = game_get_status(0);
 	pthread_mutex_unlock(&hctx->gamelock);
-	show_status(gameinfo);
-	tlastupdate = e->tmove;
+	show_status(ginfo);
+
+	nupdates = 0;
 }
 static void handle_updatetime(void)
 {
-	if ((gameinfo.status != STATUS_MOVE_BLACK && gameinfo.status != STATUS_MOVE_WHITE)
-			|| (gameinfo.tiself.movestart == -1 && gameinfo.tioppt.movestart == -1)) {
+	if (ginfo.status != STATUS_MOVE_BLACK
+			&& ginfo.status != STATUS_MOVE_WHITE)
 		return;
-	}
-
-	long tp = gettimepoint();
+	if (ginfo.tiself.movestart == ginfo.tstart
+			&& ginfo.tiopp.movestart == ginfo.tstart)
+		return;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int isplaying = game_get_moving_color() == gameinfo.selfcolor;
+	int isplaying = game_get_moving_color() == ginfo.selfcolor;
 	pthread_mutex_unlock(&hctx->gamelock);
+	struct timeinfo_t *tiplayer = isplaying ? &ginfo.tiself : &ginfo.tiopp;
 
-	struct timeinfo_t *tiplayer = isplaying ? &gameinfo.tiself : &gameinfo.tioppt;
-	long movetime = tp - tiplayer->movestart;
+	long movetime = measure_move_time(tiplayer->movestart);
 	tiplayer->total = tiplayer->subtotal - movetime;
 	if (tiplayer->total < 0) {
 		tiplayer->total = 0;
 		
-		//if (selfield[0] != -1)
-		//	unselectf();
+		if (selfield[0] != -1)
+			unselectf();
 
-		//pthread_mutex_lock(&hctx->gamelock);
-		//gameinfo.status = game_get_status(1);
-		//pthread_mutex_unlock(&hctx->gamelock);
-		//show_status(gameinfo);
-	} else if (tp - tlastupdate >= SECOND) {
-		show_status(gameinfo);
-		tlastupdate = tp;
+		pthread_mutex_lock(&hctx->gamelock);
+		ginfo.status = game_get_status(1);
+		pthread_mutex_unlock(&hctx->gamelock);
+		show_status(ginfo);
+	} else if (movetime >= nupdates * SECOND) {
+		show_status(ginfo);
+		++nupdates;
 	}
 }
 
@@ -658,14 +807,14 @@ static void gfxh_setup(void)
 		SYSERR();
 		goto cleanup_err_fcntl;
 	}
-	if (fcntl(foppt, F_SETFL, O_NONBLOCK) == -1) {
+	if (fcntl(fopp, F_SETFL, O_NONBLOCK) == -1) {
 		SYSERR();
 		goto cleanup_err_fcntl;
 	}
 
 	pfds[0].fd = fevent;
 	pfds[0].events = POLLIN;
-	pfds[1].fd = foppt;
+	pfds[1].fd = fopp;
 	pfds[1].events = POLLIN;
 
 	selfield[0] = -1;
@@ -684,15 +833,18 @@ static void gfxh_setup(void)
 	board.size = wa.width;
 	board.fieldsize = wa.height / NF;
 
-	game_init_test_board();
+	game_init_board();
 
-	gameinfo.tiself.movestart = -1;
-	gameinfo.tiself.total = gameinfo.tiself.subtotal;
-	gameinfo.tioppt.movestart = -1;
-	gameinfo.tioppt.total = gameinfo.tioppt.subtotal;
+	ginfo.tiself.subtotal = ginfo.time;
+	ginfo.tiself.movestart = ginfo.tstart;
+	ginfo.tiself.total = ginfo.tiself.subtotal;
+	ginfo.tiopp.subtotal = ginfo.time;
+	ginfo.tiopp.movestart = ginfo.tstart;
+	ginfo.tiopp.total = ginfo.tiopp.subtotal;
 
-	gameinfo.status = STATUS_MOVE_WHITE;
-	show_status(gameinfo);
+	ginfo.status = STATUS_MOVE_WHITE;
+	show_status(ginfo);
+	nupdates = -1;
 	return;
 
 cleanup_err_fcntl:
@@ -709,16 +861,16 @@ static void gfxh_run(void)
 		int n = poll(pfds, ARRNUM(pfds), 0);
 		if (n == -1) {
 			SYSERR();
-			goto cleanup_err_sys;
+			goto cleanup_err;
 		}
 
-		if (n == 0) {
+		if (ginfo.time && n == 0) {
 			handle_updatetime();
 		} else if (pfds[0].revents) {
 			n = hread(fevent, &event, sizeof(event));
 			if (n == -1) {
 				SYSERR();
-				goto cleanup_err_sys;
+				goto cleanup_err;
 			} else if (n == 1) {
 				break;
 			} else if (n == 2) {
@@ -733,14 +885,19 @@ static void gfxh_run(void)
 				handle_touch(&event.touch);
 			}
 		} else if (pfds[1].revents) {
-			n = hrecv(foppt, &event, sizeof(event));
-			if (n == -1) {
+			int err = recv_playmove(&event.playmove);
+			if (err == -1) {
 				SYSERR();
-				goto cleanup_err_sys;
-			} else if (n == 1) {
+				goto cleanup_err;
+			} else if (err == -2 || err == 2) {
+				fprintf(stderr, "%s: received move message is invalid\n", __func__);
+				goto cleanup_err;
+			} else if (err == -3) {
+				fprintf(stderr, "%s: received move message is too large\n",
+						__func__);
+				goto cleanup_err;
+			} else if (err == 1) {
 				break;
-			} else if (n == 2) {
-				continue;
 			}
 
 			handle_playmove(&event.playmove);
@@ -748,7 +905,7 @@ static void gfxh_run(void)
 	}
 	return;
 
-cleanup_err_sys:
+cleanup_err:
 	gfxh_cleanup();
 	pthread_exit(NULL);
 }
@@ -761,7 +918,7 @@ static void gfxh_cleanup(void)
 	cairo_surface_destroy(board.surface);
 	pthread_mutex_unlock(&hctx->xlock);
 
-	if (close(foppt) == -1)
+	if (close(fopp) == -1)
 		fprintf(stderr, "%s: error while closing communication socket\n", __func__);
 
 	if (close(fevent) == -1 || close(fconfirm) == -1)
@@ -779,10 +936,6 @@ void *gfxh_main(void *args)
 	winmain = a->winmain;
 	vis = a->vis;
 	memcpy(atoms, a->atoms, sizeof(a->atoms));
-	foppt = a->fopp;
-	gameinfo.selfcolor = a->gamecolor;
-	gameinfo.tiself.subtotal = a->gametime;
-	gameinfo.tioppt.subtotal = a->gametime;
 	free(a);
 
 	fevent = hctx->gfxh.pevent[0];
@@ -793,4 +946,186 @@ void *gfxh_main(void *args)
 	gfxh_run();
 	gfxh_cleanup();
 	return 0;
+}
+
+int parse_init_string(const char *str, color_t *color, long *gametime, struct tm *tp)
+{
+	const char *c = str;
+	if (strncmp(str, "white", STRLEN("white")) == 0) {
+		*color = COLOR_WHITE;
+		c += STRLEN("white");
+	} else if (strncmp(str, "black", STRLEN("black")) == 0) {
+		*color = COLOR_BLACK;
+		c += STRLEN("black");
+	} else {
+		return 1;
+	}
+	if (*c != ' ')
+		return 1;
+	++c;
+
+	const char *e;
+	parse_time(c, &e, gametime);
+	if (*e != ' ')
+		return 1;
+	c = e + 1;
+
+	e = strptime(c, "%H:%M:%S %d/%m/%Y", tp);
+	if (!e)
+		return 1;
+	if (*e != '\0')
+		return 1;
+
+	return 0;
+}
+void format_init_string(color_t color, long gametime, struct tm *tp, char *str)
+{
+	char *c = str;
+	if (color == COLOR_WHITE) {
+		strncpy(c, "black", STRLEN("black"));
+		c += STRLEN("black");
+	} else {
+		strncpy(c, "white", STRLEN("white"));
+		c += STRLEN("white");
+
+	}
+	*c = ' ';
+	++c;
+
+	size_t len;
+	format_timeinterval(gametime, c, &len, 1);
+	c += len;
+	*c = ' ';
+	++c;
+
+	size_t n = strftime(c, MAXLEN_INITTIMESTAMP + 1, "%H:%M:%S %d/%m/%Y", tp);
+	assert(n != 0);
+	c += strlen(c);
+
+	*c = '\0';
+}
+void init_communication_server(const char* node, color_t color, long gametime)
+{
+	int fsock = socket(AF_INET, SOCK_STREAM, 0);
+	if (fsock == -1) {
+		SYSERR();
+		exit(-1);
+	}
+
+	struct addrinfo hints = {0};
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+
+	struct addrinfo *res;
+	int err = getaddrinfo(node, PORTSTR, &hints, &res);
+	if (err) {
+		fprintf(stderr, "could not resolve address and port information\n");
+		fprintf(stderr, "%s", gai_strerror(err));
+		close(fsock);
+		exit(-1);
+	}
+
+	int val = 1;
+	setsockopt(fsock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+	if (bind(fsock, res->ai_addr, res->ai_addrlen) == -1) {
+		fprintf(stderr, "could not bind to specified address\n");
+		SYSERR();
+		close(fsock);
+		exit(-1);
+	}
+	freeaddrinfo(res);
+
+	struct sockaddr addr;
+	if (listen(fsock, 1) == -1) {
+		close(fsock);
+		exit(-1);
+	}
+
+	fopp = accept(fsock, NULL, NULL);
+	if (fopp == -1) {
+		close(fsock);
+		exit(-1);
+	}
+	close(fsock);
+
+	/* internally -> monotonic time, send to other client -> time both agree on: real time */
+	struct tm tstartreal;
+	measure_game_start(&tstartreal, &ginfo.tstart);
+
+	char buf[MAXLEN_INITSTR];
+	format_init_string(color, gametime, &tstartreal, buf);
+	printf("%s\n", buf);
+	int n = hsend(fopp, buf);
+	if (n == -1) {
+		SYSERR();
+		close(fopp);
+		exit(-1);
+	}
+
+	ginfo.selfcolor = color;
+	ginfo.time = gametime;
+
+	printf("%li\n", ginfo.time);
+}
+void init_communication_client(const char *node)
+{
+	fopp = socket(AF_INET, SOCK_STREAM, 0);
+	if (fopp == -1) {
+		SYSERR();
+		exit(-1);
+	}
+
+	struct addrinfo hints = {0};
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	struct addrinfo *res;
+	int err = getaddrinfo(node, PORTSTR, &hints, &res);
+	if (err) {
+		fprintf(stderr, "%s: could not resolve address and port information\n", __func__);
+		fprintf(stderr, "%s", gai_strerror(err));
+		close(fopp);
+		exit(-1);
+	}
+
+	if (connect(fopp, res->ai_addr, res->ai_addrlen) == -1) {
+		fprintf(stderr, "%s: could not connect to specified address\n", __func__);
+		SYSERR();
+		close(fopp);
+		exit(-1);
+	}
+
+	size_t bufsize = MAXLEN_INITSTR + 1;
+	char buf[bufsize];
+	err = hrecv(fopp, buf, bufsize);
+	if (err == -1) {
+		SYSERR();
+		close(fopp);
+		exit(-1);
+	} else if (err == -2) {
+		fprintf(stderr, "%s: received initialization message is invalid\n", __func__);
+		close(fopp);
+		exit(-1);
+	} else if (err == -3) {
+		fprintf(stderr, "%s: received initialization message is too large\n", __func__);
+		close(fopp);
+		exit(-1);
+	} else if (err == 1) {
+		fprintf(stderr, "%s: unexpected server shutdown\n", __func__);
+		close(fopp);
+		exit(-1);
+	}
+	printf("%s\n", buf);
+
+	struct tm tstartreal;
+	err = parse_init_string(buf, &ginfo.selfcolor, &ginfo.time, &tstartreal);
+	if (err) {
+		fprintf(stderr, "%s: received initialization message is invalid\n", __func__);
+		close(fopp);
+		exit(-1);
+	}
+	ginfo.tstart = convert_game_start(&tstartreal);
+
+	printf("%li\n", ginfo.time);
 }

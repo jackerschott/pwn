@@ -65,6 +65,7 @@ static char castlerights[2];
 static int nmoves;
 static fid updates[NUM_UPDATES_MAX][2];
 
+/* why linked list? remove? */
 static moveinfo_t *movefirst;
 static moveinfo_t *movelast;
 
@@ -264,6 +265,8 @@ static int is_possible_pawn_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 	} else if (dj == step && abs(di) == 1) { /* diagonal step with take */
 		if ((board[ito][jto] & PIECEMASK) != PIECE_NONE
 				&& (board[ito][jto] & COLORMASK) != c) {
+			if (hints && jto == promrow)
+				*hints |= HINT_PROMOTION;
 			return 1;
 		} else if (ito == fep[0] && jto == fep[1]) {
 			if (hints)
@@ -694,6 +697,14 @@ void game_get_updates(fid u[][2])
 {
 	memcpy(u, updates, 2 * NUM_UPDATES_MAX * sizeof(fid));
 }
+int game_get_move_number()
+{
+	int n = 0;
+	for (moveinfo_t *m = movelast; m; m = m->prev) {
+		++n;
+	}
+	return n / 2;
+}
 
 int game_save_board(const char *fname)
 {
@@ -725,17 +736,6 @@ int game_load_board(const char *fname)
 	return 0;
 }
 
-#define COL_CHAR(i) ('a' + i)
-#define ROW_CHAR(j) ('1' + j)
-
-static const char *piece_symbols[] = {
-	"K",
-	"Q",
-	"R",
-	"B",
-	"N",
-	"",
-};
 static char piece_chars[] = { 'k', 'q', 'r', 'b', 'n', 'p' };
 static const char *hintstrs[] = {
 	"HINT_CASTLE",
@@ -744,7 +744,6 @@ static const char *hintstrs[] = {
 	"HINT_EN_PASSANT",
 	"HINT_ADD_ATTR_TAKEABLE_EN_PASSANT",
 };
-
 
 static void print_hints(int hints)
 {
@@ -763,7 +762,7 @@ static void print_move(moveinfo_t *m)
 	fieldto[0] = COL_CHAR(m->ito);
 	fieldto[1] = ROW_CHAR(m->jto);
 
-	printf("fields: %s%s-%s\n", piece_symbols[PIECE_IDX(m->p)], fieldfrom, fieldto);
+	//printf("fields: %s%s-%s\n", piece_symbols[PIECE_IDX(m->p)], fieldfrom, fieldto);
 	//printf("fields: %s%i%i-%i%i\n", piece_symbols[PIECE_IDX(m->p)], m->ifrom, m->jfrom, m->ito, m->jto);
 
 	printf("taken: ");

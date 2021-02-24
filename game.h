@@ -40,6 +40,7 @@ piece_t game_get_piece(fid i, fid j);
 color_t game_get_color(fid i, fid j);
 fieldinfo_t game_get_fieldinfo(fid i, fid j);
 void game_get_updates(fid u[][2]);
+int game_get_move_number();
 
 int game_save_board(const char *fname);
 int game_load_board(const char *fname);

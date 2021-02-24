@@ -63,6 +63,10 @@
 #define OPP_COLOR(c) ((c) ^ COLORMASK)
 #define PIECE_IDX(p) ((p) / 2 - 1)
 #define PIECE_BY_IDX(i) (2 * (i) + 2)
+#define ROW_CHAR(j) ('a' + (j))
+#define COL_CHAR(i) ('1' + (i))
+#define ROW_BY_CHAR(c) ((c) - 'a')
+#define COL_BY_CHAR(c) ((c) - '1')
 
 #define COLORMASK 0b0001
 enum color_t {
@@ -123,6 +127,13 @@ static const char *piece_names[] = {
 	"bishop",
 	"knight",
 	"pawn",
+};
+static const char piece_symbols[] = {
+	'K',
+	'Q',
+	'R',
+	'B',
+	'N',
 };
 
 typedef enum color_t color_t;

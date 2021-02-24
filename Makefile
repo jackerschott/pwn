@@ -18,8 +18,8 @@
 include config.mk
 
 PROG = pwn
-SRC = main.c gfxh.c game.c draw.c
-HDR = pwn.h gfxh.h draw.h game.h config.h
+SRC = main.c gfxh.c game.c draw.c notation.c
+HDR = pwn.h gfxh.h game.h draw.h notation.h config.h
 OBJ = $(addprefix obj/,$(SRC:c=o))
 OBJDIR = obj
 

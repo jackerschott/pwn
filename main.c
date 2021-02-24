@@ -26,18 +26,16 @@
 #include <sys/random.h>
 #include <unistd.h>
 
-#include <arpa/inet.h>
-#include <netdb.h>
-
 #include <pthread.h>
 
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 
-#include "pwn.h"
 #include "config.h"
 #include "game.h"
 #include "gfxh.h"
+#include "notation.h"
+#include "pwn.h"
 
 /* options */
 enum {
@@ -223,91 +221,6 @@ static void on_keypress(XKeyEvent *e)
 	}
 }
 
-static int init_communication(int *fd, int *err)
-{
-	int fsock = socket(AF_INET, SOCK_STREAM, 0);
-	if (fsock == -1)
-		return -1;
-
-	int fopp;
-	if (options.flags & OPTION_IS_SERVER) {
-		struct addrinfo hints = {0};
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_STREAM;
-		hints.ai_flags = AI_PASSIVE;
-
-		struct addrinfo *res;
-		*err = getaddrinfo(options.node, PORTSTR, &hints, &res);
-		if (*err) {
-			close(fsock);
-			return -2;
-		}
-
-		int val = 1;
-		setsockopt(fsock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
-		if (bind(fsock, res->ai_addr, res->ai_addrlen) == -1) {
-			close(fsock);
-			return -1;
-		}
-		freeaddrinfo(res);
-
-		struct sockaddr addr;
-		if (listen(fsock, 1) == -1) {
-			close(fsock);
-			return -1;
-		}
-
-		fopp = accept(fsock, NULL, NULL);
-		if (fopp == -1) {
-			close(fsock);
-			return -1;
-		}
-		close(fsock);
-	}
-	else {
-		fopp = fsock;
-
-		struct addrinfo hints = {0};
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_STREAM;
-
-		struct addrinfo *res;
-		*err = getaddrinfo(options.node, PORTSTR, &hints, &res);
-		if (*err) {
-			close(fopp);
-			return -2;
-		}
-
-		if (connect(fopp, res->ai_addr, res->ai_addrlen) == -1) {
-			close(fopp);
-			return 1;
-		}
-	}
-
-	if (options.flags & OPTION_IS_SERVER) {
-		size_t n = send(fopp, &options.color, sizeof(options.color), 0);
-		if (n == -1) {
-			close(fopp);
-			return -1;
-		} else if (n < sizeof(options.color)) {
-			BUG();
-		}
-	} else {
-		color_t c;
-		size_t n = recv(fopp, &c, sizeof(c), 0);
-		if (n == -1) {
-			close(fopp);
-			return -1;
-		} else if (n < sizeof(c)) {
-			BUG();
-		}
-		options.color = OPP_COLOR(c);
-	}
-
-	*fd = fopp;
-	return 0;
-}
-
 /* debug */
 static void print_options(void)
 {
@@ -321,7 +234,6 @@ static void print_options(void)
 	printf("\tnode: %s\n", options.node);
 	printf("\tport: %s\n", options.port);
 
-	const int SECOND = 1000L * 1000L * 1000L;
 	int h = options.gametime / (60L * 60L * SECOND);
 	int m = options.gametime / (60L * SECOND) - h * 60L;
 	int i = options.moveinc;
@@ -500,19 +412,12 @@ static void setup(void)
 {
 	int ret;
 
-	int gaierr;
-	int fopp;
-	int err = init_communication(&fopp, &gaierr);
-	if (err == -1) {
-		SYSERR();
-		exit(-1);
-	} else if (err == -2) {
-		GAIERR(gaierr);
-		exit(-1);
-	} else if (err == 1) {
-		fprintf(stderr, "could not connect to %s\n", options.node);
-		SYSERR();
-		exit(-1);
+	if (options.flags & OPTION_IS_SERVER) {
+		printf("server\n");
+		init_communication_server(options.node, options.color, options.gametime);
+	} else {
+		printf("client\n");
+		init_communication_client(options.node);
 	}
 
 	/* setup X */
@@ -570,9 +475,6 @@ static void setup(void)
 	gfxhargs->winmain = winmain;
 	gfxhargs->vis = vis;
 	memcpy(gfxhargs->atoms, atoms, sizeof(atoms));
-	gfxhargs->fopp = fopp;
-	gfxhargs->gamecolor = options.color;
-	gfxhargs->gametime = options.gametime;
 	if (start_handler(gfxhargs, 0, gfxh_main, &hctx->gfxh)) {
 		fprintf(stderr, "error while starting graphics handler thread");
 		free(gfxhargs);
