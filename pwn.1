@@ -2,32 +2,39 @@
 .SH NAME
 pwn \- simple multiplayer chess game
 .SH SYNOPSIS
-.B pwn
-.RB [-c\ color]
-.RB [-h\ host\ address]
-.RB [-t\ time]
+\fI pwn\fR -l\ address -p port [-s\ color] [-t\ time]
+\fI pwn\fR -c\ address
 .SH DESCRIPTION
-pwn is a simple multiplayer chess game for the X Window System. It supports playing with time control
-and playing over a network.
+pwn is a simple multiplayer chess game for the X Window System. It supports playing with time
+control and playing over a network.
 .SH OPTIONS
 .TP
-.B \-a host address
+.B \-l address
 Set
-.I host address
-as the IP address of the host, which whom you want to play over a network. This option implies that
-you are playing with the opposite color of the one specified by your oppenent. Also, the omission
-of this option implies that you are listening for an incoming connection by your opponent.
+.I address
+as the IP address on which the progamm shall listen for a connection by an opponent.
 .TP
-.B \-c color
+.B \-c address
+Set
+.I address
+as the IP address of the opponent to whom the connection shall be established. This option implies
+that you are playing with the opposite color of the one specified by your oppenent.
+.TP
+.B \-p port
+Set
+.I port
+as the port number on which the progamm shall listen for a connection by an opponent.
+.TP
+.B \-s color
 Set
 .I color
 as the color you want to play with. A valid color is either
 .I black
 or
-.I white
+.I white\fR.
 This option can only be specified when you are listening for an incoming connection by your opponent.
 After a successfull connection your opponent will be playing with the opposite color of the one you
-specified. If this option is omitted the color gets chosen randomly
+specified. If this option is omitted the color gets chosen randomly.
 .TP
 .B \-t time
 Set
@@ -38,47 +45,30 @@ where
 .I h
 are the hours and
 .I m
-the minutes, each player gets, whereas
+the minutes each player gets. Additionally
 .I s
-specify an (optional) increment that will be added to the total timespan of each player, every time
-they make a move. If a player has used up all of his time, before the game was finished, the game
-will be decided, either by a draw or by a loss for the respective player. If this option is omitted,
-there is no time limit. This option can only be specified when you are listening for an incoming
-connection by your opponent.
+specifies an (optional) increment that will be added to the total timespan of each player every
+time they make a move. If a player has used up all of his time before the game was finished the game
+will be decided either by a draw or by a loss for the respective player. There will be no time
+limit if this option is omitted.
 .SH EXAMPLES
-As an example: To start a game between Hosts
-.I A
-with an IP address of
-.I 192.168.0.2
-and
-.I B
-with an IP address of
-.I 192.168.0.3
-run
+As an example: If Alice wants to host a game as \fIblack\fR with \fI1 hour and 30 minutes\fR clock
+time and \fI10 seconds\fR increment on the adress \fI192.168.0.2\fR with port number \fI5000\fR she would run
 .sp
 .RS 4
 .nf
-pwn -c white -t 1:30+10
+pwn -l 192.168.0.2 -p 5000 -s black -t 1:30+10
 .fi
 .P
 .RE
 .P
-on host
-.I A
-and
+Then Bob would have to run
 .sp
 .RS 4
 .nf
-pwn -h 192.168.0.2
+pwn -c 192.168.0.2
 .fi
 .P
 .RE
 .P
-on host
-.I B\fR.
-For this game,
-.I A
-is playing with the white pieces, while
-.I B
-is playing with the black ones. Each player will have 1 hour and 30 minutes for all moves, with a 10
-second increment on every move.
+to connect to Alice and play a game with the white pieces against her.
