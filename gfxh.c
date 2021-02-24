@@ -617,7 +617,7 @@ static int move(fid from[2], fid to[2], piece_t *piece, piece_t *prompiece)
 	*piece = p;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int ret = game_move(from[0], from[1], to[0], to[1], 0);
+	int ret = game_exec_ply(from[0], from[1], to[0], to[1], 0);
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (ret == -1 || ret == 1) {
 		return ret;
@@ -629,7 +629,7 @@ static int move(fid from[2], fid to[2], piece_t *piece, piece_t *prompiece)
 			return 2;
 
 		pthread_mutex_lock(&hctx->gamelock);
-		ret = game_move(from[0], from[1], to[0], to[1], *prompiece);
+		ret = game_exec_ply(from[0], from[1], to[0], to[1], *prompiece);
 		pthread_mutex_unlock(&hctx->gamelock);
 		if (ret == -1)
 			return -1;
@@ -938,7 +938,7 @@ static void handle_playmove(struct event_playmove *e)
 	}
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int err = game_move(e->from[0], e->from[1], e->to[0], e->to[1], e->prompiece);
+	int err = game_exec_ply(e->from[0], e->from[1], e->to[0], e->to[1], e->prompiece);
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (err == -1) {
 		SYSERR();
@@ -1012,11 +1012,11 @@ static void gfxh_setup(void)
 {
 	if (fcntl(fevent, F_SETFL, O_NONBLOCK) == -1) {
 		SYSERR();
-		goto cleanup_err_fcntl;
+		goto cleanup_err;
 	}
 	if (fcntl(fopp, F_SETFL, O_NONBLOCK) == -1) {
 		SYSERR();
-		goto cleanup_err_fcntl;
+		goto cleanup_err;
 	}
 
 	pfds[0].fd = fevent;
@@ -1040,7 +1040,14 @@ static void gfxh_setup(void)
 	board.size = wa.width;
 	board.fieldsize = wa.height / NF;
 
-	game_init_board();
+	pthread_mutex_lock(&hctx->gamelock);
+	int err = game_init();
+	pthread_mutex_unlock(&hctx->gamelock);
+	if (err == -1) {
+		SYSERR();
+		goto cleanup_err;
+	}
+
 
 	ginfo.tiself.subtotal = ginfo.time;
 	ginfo.tiself.movestart = ginfo.tstart;
@@ -1054,7 +1061,7 @@ static void gfxh_setup(void)
 	nupdates = -1;
 	return;
 
-cleanup_err_fcntl:
+cleanup_err:
 	pthread_mutex_lock(&hctx->mainlock);
 	hctx->terminate = 1;
 	pthread_mutex_unlock(&hctx->mainlock);

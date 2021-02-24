@@ -23,14 +23,14 @@
 
 #define NUM_UPDATES_MAX 4
 
-typedef struct moveinfo_t moveinfo_t;
+typedef struct moveinfo_t plyinfo_t;
 
-void game_init_board(void);
+int game_init(void);
 void game_init_test_board(void);
 void game_terminate(void);
 
-int game_move(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece);
-void game_undo_move(moveinfo_t *m);
+int game_exec_ply(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece);
+void game_undo_move(plyinfo_t *m);
 
 int game_is_movable_piece_at(fid i, fid j);
 status_t game_get_status(int timeout);

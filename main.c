@@ -210,10 +210,6 @@ static void on_keypress(XKeyEvent *e)
 		pthread_mutex_lock(&hctx->mainlock);
 		hctx->terminate = 1;
 		pthread_mutex_unlock(&hctx->mainlock);
-	} else if (ksym == XK_s) {
-		pthread_mutex_lock(&hctx->gamelock);
-		game_save_board("position");
-		pthread_mutex_unlock(&hctx->gamelock);
 	} else if (ksym == XK_b) {
 		pthread_mutex_lock(&hctx->gamelock);
 		print_board();
