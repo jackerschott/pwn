@@ -283,7 +283,7 @@ static void parse_options(int argc, char *argv[])
 		if (strstr(argv[i], "-n") != NULL) {
 			strcpy(optstr, ":ns:");
 		} else if (strstr(argv[i], "-c") != NULL) {
-			strcpy(optstr, ":c:");
+			strcpy(optstr, ":c:p:");
 		} else if (strstr(argv[i], "-l") != NULL) {
 			strcpy(optstr, ":l:p:s:t:");
 		} else {
@@ -354,7 +354,7 @@ static void parse_options(int argc, char *argv[])
 	} 
 
 	/* check options */
-	if (flags & OPTION_IS_SERVER && !port) {
+	if (!port) {
 		fprintf(stderr, "missing option '-p'\n");
 		free(node);
 		free(port);
@@ -414,10 +414,11 @@ static void setup(void)
 
 	if (options.flags & OPTION_IS_SERVER) {
 		printf("server\n");
-		init_communication_server(options.node, options.color, options.gametime);
+		init_communication_server(options.node, options.port,
+				options.color, options.gametime);
 	} else {
 		printf("client\n");
-		init_communication_client(options.node);
+		init_communication_client(options.node, options.port);
 	}
 
 	/* setup X */

@@ -107,8 +107,8 @@ struct gfxh_args_t {
 int hread(int fd, void *buf, size_t size);
 int hwrite(int fd, void *buf, size_t size);
 
-void init_communication_server(const char* node, color_t color, long gametime);
-void init_communication_client(const char *node);
+void init_communication_server(const char* node, const char *port, color_t color, long gametime);
+void init_communication_client(const char *node, const char *port);
 
 void *gfxh_main(void *args);
 

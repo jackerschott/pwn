@@ -3,7 +3,7 @@
 pwn \- simple multiplayer chess game
 .SH SYNOPSIS
 \fI pwn\fR -l\ address -p port [-s\ color] [-t\ time]
-\fI pwn\fR -c\ address
+\fI pwn\fR -c\ address -p port
 .SH DESCRIPTION
 pwn is a simple multiplayer chess game for the X Window System. It supports playing with time
 control and playing over a network.
@@ -23,7 +23,8 @@ that you are playing with the opposite color of the one specified by your oppene
 .B \-p port
 Set
 .I port
-as the port number on which the progamm shall listen for a connection by an opponent.
+as the port number on which the progamm shall either listen for a connection by an opponent or
+connect to an opponent.
 .TP
 .B \-s color
 Set

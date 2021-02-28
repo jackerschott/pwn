@@ -1011,7 +1011,7 @@ void format_init_string(color_t color, long gametime, struct tm *tp, char *str)
 
 	*c = '\0';
 }
-void init_communication_server(const char* node, color_t color, long gametime)
+void init_communication_server(const char* node, const char *port, color_t color, long gametime)
 {
 	int fsock = socket(AF_INET, SOCK_STREAM, 0);
 	if (fsock == -1) {
@@ -1025,7 +1025,7 @@ void init_communication_server(const char* node, color_t color, long gametime)
 	hints.ai_flags = AI_PASSIVE;
 
 	struct addrinfo *res;
-	int err = getaddrinfo(node, PORTSTR, &hints, &res);
+	int err = getaddrinfo(node, port, &hints, &res);
 	if (err) {
 		fprintf(stderr, "could not resolve address and port information\n");
 		fprintf(stderr, "%s", gai_strerror(err));
@@ -1071,10 +1071,8 @@ void init_communication_server(const char* node, color_t color, long gametime)
 
 	ginfo.selfcolor = color;
 	ginfo.time = gametime;
-
-	printf("%li\n", ginfo.time);
 }
-void init_communication_client(const char *node)
+void init_communication_client(const char *node, const char *port)
 {
 	fopp = socket(AF_INET, SOCK_STREAM, 0);
 	if (fopp == -1) {
@@ -1087,7 +1085,7 @@ void init_communication_client(const char *node)
 	hints.ai_socktype = SOCK_STREAM;
 
 	struct addrinfo *res;
-	int err = getaddrinfo(node, PORTSTR, &hints, &res);
+	int err = getaddrinfo(node, port, &hints, &res);
 	if (err) {
 		fprintf(stderr, "%s: could not resolve address and port information\n", __func__);
 		fprintf(stderr, "%s", gai_strerror(err));
