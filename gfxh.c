@@ -61,6 +61,9 @@
 #define BUFSIZE_PLAYMOVE 128
 #define TITLE_MAXLEN (MAXLEN_TIME_COARSE + STRLEN(" - ") + MAXLEN_TIME_COARSE + MSG_MAXLEN)
 
+/* maximal difference between measured game starts by server and client */
+#define TRANSDIFF_MAX (2 * SECOND)
+
 int fopp;
 
 struct timeinfo_t {
@@ -205,16 +208,21 @@ static void measure_game_start(struct tm *treal, long *tmono)
 	/* correct for delay between tsr and tsm measurement */
 	*tmono = tsm.tv_sec * SECOND + tsm.tv_nsec - tsr.tv_nsec;
 }
-static long convert_game_start(struct tm *treal)
+static long get_game_start_mono(struct tm *t)
 {
-	struct timespec tsr, tsm;
-	clock_gettime(CLOCK_REALTIME, &tsr);
-	clock_gettime(CLOCK_MONOTONIC, &tsm);
+	struct timespec tsreal, tsmono;
+	clock_gettime(CLOCK_REALTIME, &tsreal);
+	clock_gettime(CLOCK_MONOTONIC, &tsmono);
 
-	long tstart = timegm(treal) * SECOND;
-	long tm = tsm.tv_sec * SECOND + tsm.tv_nsec;
-	long tr = tsr.tv_sec * SECOND + tsr.tv_nsec;
-	return tm - (tr - tstart);
+	long tgamestart = timegm(t) * SECOND;
+	long tmono = tsmono.tv_sec * SECOND + tsmono.tv_nsec;
+	long treal = tsreal.tv_sec * SECOND + tsreal.tv_nsec;
+
+	long transdiff = treal - tgamestart;
+	if (transdiff > TRANSDIFF_MAX)
+		return 1;
+
+	return tmono - transdiff;
 }
 static long measure_move_time(long tstart)
 {
@@ -416,7 +424,6 @@ static int prompt_promotion_piece(piece_t *p)
 		close(fans[0]);
 	}
 
-	printf("name: %s\n", name);
 	int i = 1;
 	for (; i < ARRNUM(piece_names) - 1; ++i) {
 		if (strncmp(name, piece_names[i], strlen(piece_names[i])) == 0)
@@ -1055,7 +1062,6 @@ void init_communication_server(const char* node, color_t color, long gametime)
 
 	char buf[MAXLEN_INITSTR];
 	format_init_string(color, gametime, &tstartreal, buf);
-	printf("%s\n", buf);
 	int n = hsend(fopp, buf);
 	if (n == -1) {
 		SYSERR();
@@ -1116,7 +1122,6 @@ void init_communication_client(const char *node)
 		close(fopp);
 		exit(-1);
 	}
-	printf("%s\n", buf);
 
 	struct tm tstartreal;
 	err = parse_init_string(buf, &ginfo.selfcolor, &ginfo.time, &tstartreal);
@@ -1125,7 +1130,11 @@ void init_communication_client(const char *node)
 		close(fopp);
 		exit(-1);
 	}
-	ginfo.tstart = convert_game_start(&tstartreal);
-
-	printf("%li\n", ginfo.time);
+	long tstart = get_game_start_mono(&tstartreal);
+	if (tstart == -1) {
+		fprintf(stderr, "%s: server and client don't agree on start time\n", __func__);
+		close(fopp);
+		exit(-1);
+	}
+	ginfo.tstart = tstart;
 }
