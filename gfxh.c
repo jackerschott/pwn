@@ -54,15 +54,15 @@
 #define JTOY(j, yorig, fieldsize, c) \
 	(yorig + ((1 - (c)) * (NF - (j) - 1) + (c) * (j)) * fieldsize)
 
-#define MAXLEN_INITTIMESTAMP (STRLEN("00:00:00 01/01/1970"))
-#define MAXLEN_INITCOLOR (MAX(STRLEN("white"), STRLEN("black")))
-#define MAXLEN_INITSTR (MAXLEN_INITCOLOR + STRLEN(" ") + MAXLEN_TIME_COARSE + STRLEN(" ") + MAXLEN_INITTIMESTAMP)
-#define MAXLEN_PLAYMOVE (MAXLEN_MOVE + MAXLEN_TIME + 1)
-#define BUFSIZE_PLAYMOVE 128
-#define TITLE_MAXLEN (MAXLEN_TIME_COARSE + STRLEN(" - ") + MAXLEN_TIME_COARSE + MSG_MAXLEN)
+#define INITCOLOR_MAXLEN (MAX(STRLEN("white"), STRLEN("black")))
+#define INITSTR_MAXLEN (INITCOLOR_MAXLEN + STRLEN(" ") + TINTERVAL_COARSE_MAXLEN \
+		+ STRLEN(" ") + TSTAMP_MAXLEN)
+#define PLAYMOVE_MAXLEN (MOVE_MAXLEN + STRLEN(" ") + TINTERVAL_MAXLEN + STRLEN(" ") + TSTAMP_MAXLEN)
+#define TITLE_MAXLEN (TINTERVAL_COARSE_MAXLEN + STRLEN(" - ") + TINTERVAL_COARSE_MAXLEN \
+		+ MSG_MAXLEN)
 
 /* maximal difference between measured game starts by server and client */
-#define TRANSDIFF_MAX (2 * SECOND)
+#define TRANSDIFF_MAX SECOND
 
 int fopp;
 
@@ -158,6 +158,7 @@ int hrecv(int fd, char *buf, size_t size)
 
 		if (b[n - 1] == '\n') {
 			b[n - 1] = '\0';
+			printf("[received] %s\n", b);
 			return 0;
 		}
 
@@ -193,32 +194,34 @@ int hsend(int fd, char *buf)
 		b += n;
 		size -= n;
 	}
+
+	char *c = strchr(buf, '\n');
+	*c = '\0';
+	printf("[send] %s\n", buf);
 	return 0;
 }
 
-static void measure_game_start(struct tm *treal, long *tmono)
+static void measure_game_start(long *treal, long *tmono)
 {
 	/* measure game start in real and monotonic time */
 	struct timespec tsr, tsm;
 	clock_gettime(CLOCK_REALTIME, &tsr);
 	clock_gettime(CLOCK_MONOTONIC, &tsm);
 
-	gmtime_r(&tsr.tv_sec, treal);
-
+	*treal = tsr.tv_sec * SECOND + tsr.tv_nsec;
 	/* correct for delay between tsr and tsm measurement */
 	*tmono = tsm.tv_sec * SECOND + tsm.tv_nsec - tsr.tv_nsec;
 }
-static long get_game_start_mono(struct tm *t)
+static long get_game_start_mono(long t)
 {
 	struct timespec tsreal, tsmono;
 	clock_gettime(CLOCK_REALTIME, &tsreal);
 	clock_gettime(CLOCK_MONOTONIC, &tsmono);
 
-	long tgamestart = timegm(t) * SECOND;
 	long tmono = tsmono.tv_sec * SECOND + tsmono.tv_nsec;
 	long treal = tsreal.tv_sec * SECOND + tsreal.tv_nsec;
 
-	long transdiff = treal - tgamestart;
+	long transdiff = treal - t;
 	if (transdiff > TRANSDIFF_MAX)
 		return 1;
 
@@ -232,25 +235,31 @@ static long measure_move_time(long tstart)
 
 	return t - tstart;
 }
-
-static long gettimepoint(void)
+static long measure_timestamp()
 {
-	struct timespec tp;
-	clock_gettime(CLOCK_MONOTONIC, &tp);
-	return tp.tv_sec * SECOND + tp.tv_nsec;
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	return ts.tv_sec * SECOND + ts.tv_nsec;
 }
 
 void format_playmove(struct event_playmove *e, char *str)
 {
 	size_t l;
 	char *c = str;
-	format_move(e->piece, e->from, e->to, e->prompiece, str, &l);
+
+	l = format_move(e->piece, e->from, e->to, e->prompiece, c);
 	c += l;
 
 	*c = ' ';
 	++c;
 
-	format_timeinterval(e->tmove, c, &l, 0);
+	l = format_timeinterval(e->tmove, c, 0);
+	c += l;
+
+	*c = ' ';
+	++c;
+
+	l = format_timestamp(e->tstamp, c, 0);
 	c += l;
 
 	*c = '\0';
@@ -259,28 +268,30 @@ int parse_playmove(char *str, struct event_playmove *e)
 {
 	e->type = EVENT_PLAYMOVE;
 
-	char *c = strtok(str, " ");
-	if (c == NULL)
+	char *c = str;
+	if (!(c = parse_move(c, &e->piece, e->from, e->to, &e->prompiece)))
 		return 1;
-
-	if (parse_move(c, &e->piece, e->from, e->to, &e->prompiece))
-		return 1;
-
-	c = strtok(NULL, " ");
-	if (c == NULL) {
+	if (*c != ' ') {
 		e->tmove = measure_move_time(ginfo.tiself.movestart);
 		return 0;
 	}
 
 	const char *end;
-	if (parse_time(c, &end, &e->tmove))
+	if (!(c = parse_timeinterval(c, &e->tmove)))
 		return 1;
-	if (*end != '\0')
+	if (*c == '\0')
+		return 0;
+	if (*c != ' ')
+		return 1;
+
+	if (!(c = parse_timestamp(c, &e->tstamp)))
+		return 1;
+	if (*c != '\0')
 		return 1;
 
 	return 0;
 }
-int send_playmove(piece_t piece, fid from[2], fid to[2], piece_t prompiece, long tmove)
+int send_playmove(piece_t piece, fid from[2], fid to[2], piece_t prompiece, long tmove, long tstamp)
 {
 	union event_t e;
 	memset(&e, 0, sizeof(e));
@@ -290,8 +301,9 @@ int send_playmove(piece_t piece, fid from[2], fid to[2], piece_t prompiece, long
 	memcpy(e.playmove.to, to, sizeof(e.playmove.to));
 	e.playmove.prompiece = prompiece;
 	e.playmove.tmove = tmove;
+	e.playmove.tstamp = tstamp;
 
-	char buf[MAXLEN_PLAYMOVE + 1];
+	char buf[PLAYMOVE_MAXLEN + 1];
 	format_playmove(&e.playmove, buf);
 
 	int err = hsend(fopp, buf);
@@ -302,13 +314,20 @@ int send_playmove(piece_t piece, fid from[2], fid to[2], piece_t prompiece, long
 }
 int recv_playmove(struct event_playmove *e)
 {
-	char buf[BUFSIZE_PLAYMOVE];
-	int err = hrecv(fopp, buf, BUFSIZE_PLAYMOVE);
+	long tstamp = measure_timestamp();
+
+	const size_t bufsize = PLAYMOVE_MAXLEN + 1;
+	char buf[bufsize];
+	int err = hrecv(fopp, buf, bufsize);
 	if (err != 0)
 		return err;
 
 	if (parse_playmove(buf, e))
 		return 2;
+
+	if ((tstamp - e->tstamp) > TRANSDIFF_MAX)
+		return 3;
+
 
 	return 0;
 }
@@ -320,13 +339,13 @@ static void show_status(struct gameinfo_t ginfo)
 
 	size_t len;
 	if (ginfo.time) {
-		format_timeinterval(ginfo.tiself.total, c, &len, 1);
+		len = format_timeinterval(ginfo.tiself.total, c, 1);
 		c += len;
 
 		strncpy(c, " - ", STRLEN(" - "));
 		c += STRLEN(" - ");
 
-		format_timeinterval(ginfo.tiopp.total, c, &len, 1);
+		len = format_timeinterval(ginfo.tiopp.total, c, 1);
 		c += len;
 
 		*c = ' ';
@@ -701,9 +720,8 @@ static void handle_touch(struct event_touch *e)
 		}
 
 		long tmove = measure_move_time(ginfo.tiself.movestart);
-
-
-		err = send_playmove(piece, selfield, f, prompiece, tmove);
+		long tstamp = measure_timestamp();
+		err = send_playmove(piece, selfield, f, prompiece, tmove, tstamp);
 		if (err == -1) {
 			SYSERR();
 			gfxh_cleanup();
@@ -903,6 +921,9 @@ static void gfxh_run(void)
 				fprintf(stderr, "%s: received move message is too large\n",
 						__func__);
 				goto cleanup_err;
+			} else if (err == 3) {
+				fprintf(stderr, "warning: move transmission time larger than %li\n",
+						TRANSDIFF_MAX);
 			} else if (err == 1) {
 				break;
 			}
@@ -955,7 +976,7 @@ void *gfxh_main(void *args)
 	return 0;
 }
 
-int parse_init_string(const char *str, color_t *color, long *gametime, struct tm *tp)
+int parse_init_string(const char *str, color_t *color, long *gametime, long *tstamp)
 {
 	const char *c = str;
 	if (strncmp(str, "white", STRLEN("white")) == 0) {
@@ -971,21 +992,20 @@ int parse_init_string(const char *str, color_t *color, long *gametime, struct tm
 		return 1;
 	++c;
 
-	const char *e;
-	parse_time(c, &e, gametime);
-	if (*e != ' ')
+	if (!(c = parse_timeinterval(c, gametime)))
 		return 1;
-	c = e + 1;
+	if (*c != ' ')
+		return 1;
+	++c;
 
-	e = strptime(c, "%H:%M:%S %d/%m/%Y", tp);
-	if (!e)
+	if (!(c = parse_timestamp(c, tstamp)))
 		return 1;
-	if (*e != '\0')
+	if (*c != '\0')
 		return 1;
 
 	return 0;
 }
-void format_init_string(color_t color, long gametime, struct tm *tp, char *str)
+void format_init_string(color_t color, long gametime, long tstamp, char *str)
 {
 	char *c = str;
 	if (color == COLOR_WHITE) {
@@ -1000,14 +1020,13 @@ void format_init_string(color_t color, long gametime, struct tm *tp, char *str)
 	++c;
 
 	size_t len;
-	format_timeinterval(gametime, c, &len, 1);
+	len = format_timeinterval(gametime, c, 1);
 	c += len;
 	*c = ' ';
 	++c;
 
-	size_t n = strftime(c, MAXLEN_INITTIMESTAMP + 1, "%H:%M:%S %d/%m/%Y", tp);
-	assert(n != 0);
-	c += strlen(c);
+	len = format_timestamp(tstamp, c, 0);
+	c += len;
 
 	*c = '\0';
 }
@@ -1057,11 +1076,11 @@ void init_communication_server(const char* node, const char *port, color_t color
 	close(fsock);
 
 	/* internally -> monotonic time, send to other client -> time both agree on: real time */
-	struct tm tstartreal;
+	long tstartreal;
 	measure_game_start(&tstartreal, &ginfo.tstart);
 
-	char buf[MAXLEN_INITSTR];
-	format_init_string(color, gametime, &tstartreal, buf);
+	char buf[INITSTR_MAXLEN];
+	format_init_string(color, gametime, tstartreal, buf);
 	int n = hsend(fopp, buf);
 	if (n == -1) {
 		SYSERR();
@@ -1100,7 +1119,7 @@ void init_communication_client(const char *node, const char *port)
 		exit(-1);
 	}
 
-	size_t bufsize = MAXLEN_INITSTR + 1;
+	size_t bufsize = INITSTR_MAXLEN + 1;
 	char buf[bufsize];
 	err = hrecv(fopp, buf, bufsize);
 	if (err == -1) {
@@ -1121,15 +1140,15 @@ void init_communication_client(const char *node, const char *port)
 		exit(-1);
 	}
 
-	struct tm tstartreal;
+	long tstartreal;
 	err = parse_init_string(buf, &ginfo.selfcolor, &ginfo.time, &tstartreal);
 	if (err) {
 		fprintf(stderr, "%s: received initialization message is invalid\n", __func__);
 		close(fopp);
 		exit(-1);
 	}
-	long tstart = get_game_start_mono(&tstartreal);
-	if (tstart == -1) {
+	long tstart = get_game_start_mono(tstartreal);
+	if (tstart == 1) {
 		fprintf(stderr, "%s: server and client don't agree on start time\n", __func__);
 		close(fopp);
 		exit(-1);

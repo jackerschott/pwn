@@ -59,6 +59,7 @@ struct event_playmove {
 	fid to[2];
 	piece_t prompiece;
 	long tmove;
+	long tstamp;
 };
 union event_t {
 	int type;

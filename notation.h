@@ -5,14 +5,19 @@
 
 #define SECOND (1000L * 1000L * 1000L)
 
-#define MAXLEN_MOVE (STRLEN("Sg1-f3"))
-#define MAXLEN_TIME (STRLEN("10:00:00.000000000"))
-#define MAXLEN_TIME_COARSE (STRLEN("10:00:00"))
+#define MOVE_MAXLEN (STRLEN("Sg1-f3"))
+#define TINTERVAL_MAXLEN (STRLEN("10:00:00.000000000"))
+#define TINTERVAL_COARSE_MAXLEN (STRLEN("10:00:00"))
+#define TSTAMP_MAXLEN (STRLEN("1970-01-01 00:00:00.000000000"))
+#define TSTAMP_COARSE_MAXLEN (STRLEN("1970-01-01 00:00:00"))
 
-void format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char *str, size_t *len);
-void format_timeinterval(long t, char *str, size_t *len, int coarse);
+size_t format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char *str);
+size_t format_timeinterval(long t, char *str, int coarse);
+size_t format_timestamp(long t, char *s, int coarse);
 
-int parse_move(const char *str, piece_t *piece, fid from[2], fid to[2], piece_t *prompiece);
-int parse_time(const char *str, const char **end, long *t);
+char *parse_move(const char *s, piece_t *piece,
+		fid from[2], fid to[2], piece_t *prompiece);
+char *parse_timeinterval(const char *s, long *t);
+char *parse_timestamp(const char *s, long *t);
 
 #endif /* NOTATION_H */

@@ -1,17 +1,41 @@
+/*  pwn - simple multiplayer chess game
+ *
+ *  Copyright (C) 2020 Jona Ackerschott
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#define _XOPEN_SOURCE 700
+#define _DEFAULT_SOURCE
+
 #include <assert.h>
 #include <ctype.h>
 #include <string.h>
+#include <time.h>
 
 #include "notation.h"
 
 #define DIVROUND(a, b) (((a) + ((b) - 1)) / (b))
 
-void format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char *str, size_t *len)
+size_t format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char *str)
 {
-	assert(prompiece == PIECE_NONE
-			|| piece == PIECE_PAWN
-			&& PIECE_IDX(prompiece) >= 1 && PIECE_IDX(prompiece) <= 4);
+	assert(memcmp(from, to, 2 * sizeof(fid)) != 0);
+	assert(prompiece == PIECE_NONE || piece == PIECE_PAWN
+			&& PIECE_IDX(prompiece) >= PIECE_IDX(PIECE_QUEEN)
+			&& PIECE_IDX(prompiece) <= PIECE_IDX(PIECE_KNIGHT));
 
+	size_t len;
 	char *c = str;
 	if (piece != PIECE_PAWN) {
 		*c = piece_symbols[PIECE_IDX(piece)];
@@ -30,11 +54,13 @@ void format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char 
 		++c;
 	}
 
-	*len = c - str;
-	assert(*len <= MAXLEN_MOVE);
+	len = c - str;
+	assert(len <= MOVE_MAXLEN);
+	return len;
 }
-void format_timeinterval(long t, char *str, size_t *len, int coarse)
+size_t format_timeinterval(long t, char *str, int coarse)
 {
+	size_t len;
 	long ns, us, ms, s, m, h;
 	str[0] = '\0';
 	if (coarse) {
@@ -46,7 +72,8 @@ void format_timeinterval(long t, char *str, size_t *len, int coarse)
 		m -= 60L * h;
 
 		sprintf(str, "%li:%.2li:%.2li", h, m, s);
-		*len = strlen(str);
+		len = strlen(str);
+		assert(len <= TINTERVAL_COARSE_MAXLEN);
 	} else {
 		ns = t;
 		s = ns / SECOND;
@@ -58,29 +85,52 @@ void format_timeinterval(long t, char *str, size_t *len, int coarse)
 		m -= 60L * h;
 
 		sprintf(str, "%li:%.2li:%.2li.%.9li", h, m, s, ns);
-		*len = strlen(str);
+		len = strlen(str);
+		assert(len <= TINTERVAL_MAXLEN);
 	}
 
-	assert(*len <= MAXLEN_TIME);
+	return len;
 }
-
-/* TODO: respect len while parsing */
-static long parse_number(const char *str, char **end)
+size_t format_timestamp(long t, char *s, int coarse)
 {
-	if (isspace(*str))
-		return -1;
+	size_t len;
+	char *c = s;
 
-	long l = strtol(str, end, 10);
-	if (errno == ERANGE)
-		return -1;
+	long tcoarse = t / SECOND;
+	long tfine = t % SECOND;
 
-	return l;
+	struct tm bdt;
+	gmtime_r(&tcoarse, &bdt);
+
+	len = strftime(s, TSTAMP_COARSE_MAXLEN + 1, "%Y-%m-%d %H:%M:%S", &bdt);
+	c += len;
+
+	if (!coarse) {
+		sprintf(c, ".%.9li", tfine);
+		len = strlen(s);
+	}
+
+	assert(len <= TSTAMP_MAXLEN);
+	return len;
 }
-int parse_move(const char *str, piece_t *piece,
+
+static char *parse_number(const char *s, long *n)
+{
+	if (isspace(*s))
+		return NULL;
+
+	char *e;
+	*n = strtol(s, &e, 10);
+	if (errno == ERANGE)
+		return NULL;
+
+	return e;
+}
+char *parse_move(const char *s, piece_t *piece,
 		fid from[2], fid to[2], piece_t *prompiece)
 {
 	/* get piece */
-	const char *c = str;
+	const char *c = s;
 	piece_t p = PIECE_NONE;
 	for (int i = 0; i < ARRNUM(piece_symbols); ++i) {
 		if (*c == piece_symbols[i]) {
@@ -95,92 +145,91 @@ int parse_move(const char *str, piece_t *piece,
 
 	/* get start and destination field */
 	if (*c < 'a' || *c > 'h')
-		return 1;
+		return NULL;
 	from[0] = ROW_BY_CHAR(*c);
 	++c;
 
 	if (*c < '1' || *c > '8')
-		return 1;
+		return NULL;
 	from[1] = COL_BY_CHAR(*c);
 	++c;
 
 	if (*c != '-')
-		return 1;
+		return NULL;
 	++c;
 
 	if (*c < 'a' || *c > 'h')
-		return 1;
+		return NULL;
 	to[0] = ROW_BY_CHAR(*c);
 	++c;
 
 	if (*c < '1' || *c > '8')
-		return 1;
+		return NULL;
 	to[1] = COL_BY_CHAR(*c);
 	++c;
 
 	/* get prompiece */
-	if (*c != '\0') {
-		p = PIECE_NONE;
-		for (int i = 1; i < 4; ++i) {
-			if (*c == piece_symbols[i]) {
-				p = PIECE_BY_IDX(i);
-				++c;
-				break;
-			}
+	p = PIECE_NONE;
+	for (int i = PIECE_IDX(PIECE_QUEEN); i <= PIECE_IDX(PIECE_KNIGHT); ++i) {
+		if (*c == piece_symbols[i]) {
+			p = PIECE_BY_IDX(i);
+			++c;
+			break;
 		}
-		if (p == PIECE_NONE)
-			return 1;
-		*prompiece = p;
-	} else {
-		*prompiece = PIECE_NONE;
 	}
+	*prompiece = p;
 
-	if (*c != '\0')
-		return 1;
-	return 0;
+	return (char *)c;
 }
-int parse_time(const char *str, const char **end, long *t)
+char *parse_timeinterval(const char *s, long *t)
 {
-	long h, m, s;
+	const char *c = s;
 
-	const char *c = str;
-	char *e;
-	h = parse_number(c, &e);
-	if (h == -1)
-		return 1;
-	c = e;
+	struct tm bdt;
+	if (!(c = strptime(c, "%H", &bdt)))
+		return NULL;
+	*t = bdt.tm_hour * 3600L * SECOND;
 
-	if (*c != ':')
-		return 1;
-	++c;
+	if (!(c = strptime(c, ":%M", &bdt)))
+		return (char *)c;
+	*t += bdt.tm_min * 60L * SECOND;
 
-	m = parse_number(c, &e);
-	if (m == -1)
-		return 1;
-	c = e;
+	if (!(c = strptime(c, ":%S", &bdt)))
+		return (char *)c;
+	*t += bdt.tm_sec * SECOND;
 
-	if (*c != ':')
-		return 1;
-	++c;
-
-	s = parse_number(c, &e);
-	if (s == -1)
-		return 1;
-	c = e;
-
-	long ns = 0;
-	if (*c == '.') {
-		++c;
-
-		ns = parse_number(c, (char **)&c);
-		if (ns == -1)
-			return 1;
+	if (*c != '.') {
+		return (char *)c;
 	}
+	++c;
 
-	*end = c;
-	*t = h * 3600L * SECOND
-		+ m * 60L * SECOND
-		+ s * SECOND
-		+ ns;
-	return 0;
+	long ns;
+	if (!(c = parse_number(c, &ns))) {
+		return (char *)c;
+	}
+	*t += ns;
+
+	return (char *)c;
+}
+char *parse_timestamp(const char *s, long *t)
+{
+	const char *c = s;
+
+	struct tm bdt;
+	c = strptime(c, "%Y-%m-%d %H:%M:%S", &bdt);
+	*t = timegm(&bdt) * SECOND;
+
+	if (*c != '.') {
+		return (char *)c;
+	}
+	++c;
+
+	long ns;
+	c = parse_number(c, &ns);
+	if (!c) {
+		return (char *)c;
+	}
+	*t += ns;
+
+	return (char *)c;
 }
