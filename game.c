@@ -646,9 +646,9 @@ status_t game_get_status(int timeout)
 {
 	if (timeout) {
 		if (moving_color == COLOR_WHITE) {
-			return STATUS_BLACK_WON_TIMEOUT;
+			return STATUS_TIMEOUT_WHITE;
 		} else {
-			return STATUS_WHITE_WON_TIMEOUT;
+			return STATUS_TIMEOUT_BLACK;
 		}
 	}
 
@@ -657,8 +657,8 @@ status_t game_get_status(int timeout)
 		get_king(moving_color, &iking, &jking);
 
 		if (is_king_in_check(moving_color, iking, jking)) {
-			return moving_color ? STATUS_WHITE_WON_CHECKMATE
-				: STATUS_BLACK_WON_CHECKMATE;
+			return moving_color ? STATUS_CHECKMATE_BLACK
+				: STATUS_CHECKMATE_WHITE;
 		} else {
 			return STATUS_DRAW_STALEMATE;
 		}
@@ -674,7 +674,7 @@ status_t game_get_status(int timeout)
 	//if (n >= 3)
 	//	return STATUS_DRAW_REPETITION;
 
-	return moving_color ? STATUS_MOVE_BLACK : STATUS_MOVE_WHITE;
+	return moving_color ? STATUS_MOVING_BLACK : STATUS_MOVING_WHITE;
 }
 
 color_t game_get_moving_color()

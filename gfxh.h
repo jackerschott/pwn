@@ -28,7 +28,9 @@ enum {
 	EVENT_REDRAW,
 	EVENT_TOUCH,
 	EVENT_KEYTOUCH,
+	EVENT_INIT,
 	EVENT_PLAYMOVE,
+	EVENT_STATUSCHANGE,
 };
 enum {
 	TOUCH_PRESS = 0,
@@ -52,6 +54,12 @@ struct event_touch {
 	int y;
 	int flags;
 };
+struct event_init {
+	int type;
+	color_t color;
+	long gametime;
+	long tstamp;
+};
 struct event_playmove {
 	int type;
 	piece_t piece;
@@ -61,12 +69,18 @@ struct event_playmove {
 	long tmove;
 	long tstamp;
 };
+struct event_statuschange {
+	int type;
+	status_t status;
+};
 union event_t {
 	int type;
+	struct event_clientmessage clientmessage;
 	struct event_redraw redraw;
 	struct event_touch touch;
+	struct event_init init;
 	struct event_playmove playmove;
-	struct event_clientmessage clientmessage;
+	struct event_statuschange statuschange;
 };
 
 struct handler_t {
