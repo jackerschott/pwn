@@ -76,6 +76,8 @@
 		+ TINTERVAL_COARSE_MAXLEN 			\
 		+ STATMSG_TEXTS_MAXLEN)
 
+#define TIMEOUTDIFF_MAX (SECOND / 10)
+
 /* maximal difference between measured game starts by server and client */
 #define TRANSDIFF_MAX SECOND
 
@@ -388,6 +390,7 @@ static int parse_statusmsg(const char *str, struct event_statuschange *e)
 
 	const char *c = str;
 	assert(strncmp(c, STATMSG_PREFIX " ", STRLEN(STATMSG_PREFIX " ")) == 0);
+	c += STRLEN(STATMSG_PREFIX " ");
 
 	int s = -1;
 	size_t l;
@@ -639,7 +642,6 @@ static int move(fid from[2], fid to[2], piece_t *piece, piece_t *prompiece)
 }
 static int apply_move(fid f[2], fid updates[NUM_UPDATES_MAX][2])
 {
-
 	piece_t piece, prompiece;
 	int err = move(selfield, f, &piece, &prompiece);
 	if (err == -1) {
@@ -684,11 +686,23 @@ static int apply_move(fid f[2], fid updates[NUM_UPDATES_MAX][2])
 	}
 
 	/* update status */
+	status_t status = ginfo.status;
 	pthread_mutex_lock(&hctx->gamelock);
-	status_t stat = game_get_status(0);
+	game_get_status(&status);
 	pthread_mutex_unlock(&hctx->gamelock);
 
-	ginfo.status = stat;
+	/* communicate status */
+	memset(&e, 0, sizeof(e));
+	e.statuschange.type = EVENT_STATUSCHANGE;
+	e.statuschange.status = status;
+	err = send_msg(&e);
+	if (err == -1) {
+		SYSERR();
+		gfxh_cleanup();
+		pthread_exit(NULL);
+	}
+
+	ginfo.status = status;
 	ginfo.tiself.total = ginfo.tiself.subtotal - deduction;
 	ginfo.tiself.subtotal = ginfo.tiself.total;
 	ginfo.tiopp.movestart = ginfo.tiself.movestart + tmove;
@@ -932,6 +946,12 @@ static void handle_touch(struct event_touch *e)
 }
 static void handle_playmove(struct event_playmove *e)
 {
+	if (ginfo.status != STATUS_MOVING_WHITE && ginfo.status != STATUS_MOVING_BLACK) {
+		fprintf(stderr, "%s: received move in state %s", __func__, statmsg_names[(int)ginfo.status]);
+		gfxh_cleanup();
+		pthread_exit(NULL);
+	}
+	
 	long tstamp = measure_timestamp();
 	if ((e->tstamp - e->tstamp) > TRANSDIFF_MAX) {
 		fprintf(stderr, "warning: move transmission time larger than %li\n", TRANSDIFF_MAX);
@@ -965,16 +985,68 @@ static void handle_playmove(struct event_playmove *e)
 	ginfo.tiopp.subtotal = ginfo.tiopp.total;
 	ginfo.tiself.movestart = ginfo.tiopp.movestart + e->tmove;
 
+	status_t status = ginfo.status;
 	pthread_mutex_lock(&hctx->gamelock);
-	ginfo.status = game_get_status(0);
+	game_get_status(&status);
 	pthread_mutex_unlock(&hctx->gamelock);
+
+	ginfo.status = status;
 	show_status(ginfo);
 
 	nupdates = 0;
 }
 static void handle_statuschange(struct event_statuschange *e)
 {
+	switch (e->status) {
+	case STATUS_MOVING_WHITE:
+	case STATUS_MOVING_BLACK:
+		break;
+	case STATUS_CHECKMATE_WHITE:
+	case STATUS_CHECKMATE_BLACK:
+	case STATUS_DRAW_MATERIAL:
+	case STATUS_DRAW_STALEMATE:
+	case STATUS_DRAW_REPETITION:
+	case STATUS_DRAW_FIFTY_MOVES:
+		if (e->status != ginfo.status)
+			goto err_false_claim;
+		break;
+	case STATUS_TIMEOUT_WHITE:
+	case STATUS_TIMEOUT_BLACK:
+	case STATUS_DRAW_MATERIAL_VS_TIMEOUT:
+		pthread_mutex_lock(&hctx->gamelock);
+		int isplaying = game_get_moving_color() == ginfo.selfcolor;
+		pthread_mutex_unlock(&hctx->gamelock);
+		if (isplaying)
+			goto err_false_claim;
 
+		if ((ginfo.status == STATUS_MOVING_WHITE || ginfo.status == STATUS_MOVING_BLACK)
+				&& labs(ginfo.tiopp.total) <= TIMEOUTDIFF_MAX) {
+			ginfo.status = e->status;
+			show_status(ginfo);
+			break;
+		}
+
+		if (e->status != ginfo.status)
+			goto err_false_claim;
+
+		break;
+	case STATUS_SURRENDER_WHITE:
+	case STATUS_SURRENDER_BLACK:
+		ginfo.status = e->status;
+		show_status(ginfo);
+	default:
+		assert(0);
+	}
+	assert(e->status == ginfo.status);
+	return;
+
+err_false_claim:
+	fprintf(stderr, "%s: opponent claims %s\n", __func__,
+			statmsg_names[(int)e->status]);
+	fprintf(stderr, "%s: game will not be continued with unreasonable opponent\n",
+			__func__);
+	gfxh_cleanup();
+	pthread_exit(NULL);
 }
 static void handle_updatetime(void)
 {
@@ -998,9 +1070,25 @@ static void handle_updatetime(void)
 		if (selfield[0] != -1)
 			unselectf();
 
+		/* update status */
+		status_t status = ginfo.selfcolor ? STATUS_TIMEOUT_BLACK : STATUS_TIMEOUT_WHITE;
 		pthread_mutex_lock(&hctx->gamelock);
-		ginfo.status = game_get_status(1);
+		game_get_status(&status);
 		pthread_mutex_unlock(&hctx->gamelock);
+
+		/* communicate status */
+		union event_t e;
+		memset(&e, 0, sizeof(e));
+		e.statuschange.type = EVENT_STATUSCHANGE;
+		e.statuschange.status = status;
+		int err = send_msg(&e);
+		if (err == -1) {
+			SYSERR();
+			gfxh_cleanup();
+			pthread_exit(NULL);
+		}
+
+		ginfo.status = status;
 		show_status(ginfo);
 	} else if (movetime >= nupdates * SECOND) {
 		show_status(ginfo);

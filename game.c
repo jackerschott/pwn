@@ -47,22 +47,26 @@
 #define PLIES_BUFSIZE 4
 //#define PLIES_BUFSIZE 64
 
+#define DRAWISH_MOVES_MAX 50
+
 struct moveinfo_t {
 	piece_t p;
 	fid from[2];
 	fid to[2];
 	piece_t taken;
-	fid fep[2];
 	piece_t prompiece;
-	int ndrawmoves; /* half move: ply */
+	fid fep[2];
+	int castlerights[2];
+	fieldinfo_t position[NF][NF];
+	int ndrawplies;
 	int hints;
 };
 
-static fieldinfo_t board[NF][NF];
+static fieldinfo_t position[NF][NF];
 static color_t moving_color;
 static fid fep[2];
-static char castlerights[2];
-static int num_drawish_moves;
+static int castlerights[2];
+static int num_drawish_plies;
 static fid updates[NUM_UPDATES_MAX][2];
 
 static unsigned int pliesnum;
@@ -75,8 +79,8 @@ static void print_move(plyinfo_t *m);
 
 static int is_possible_queen_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hints)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
-	if ((board[ito][jto] != PIECE_NONE) && (board[ito][jto] & COLORMASK) == c)
+	color_t c = position[ifrom][jfrom] & COLORMASK;
+	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -91,19 +95,19 @@ static int is_possible_queen_move(fid ifrom, fid jfrom, fid ito, fid jto, int *h
 		for (int k = 1; k < abs(ito - ifrom); ++k) {
 			int i = ifrom + vi * k;
 			int j = jfrom + vj * k;
-			if ((board[i][j] & PIECEMASK) != PIECE_NONE)
+			if ((position[i][j] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
 		return 1;
 	} else if (di == 0) { /* like rook, vertically */
 		for (int j = MIN(jfrom, jto) + 1; j < MAX(jfrom, jto); ++j) {
-			if ((board[ifrom][j] & PIECEMASK) != PIECE_NONE)
+			if ((position[ifrom][j] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
 		return 1;
 	} else if (dj == 0) { /* like rook, horizontally */
 		for (int i = MIN(ifrom, ito) + 1; i < MAX(ifrom, ito); ++i) {
-			if ((board[i][jfrom] & PIECEMASK) != PIECE_NONE)
+			if ((position[i][jfrom] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
 		return 1;
@@ -113,8 +117,8 @@ static int is_possible_queen_move(fid ifrom, fid jfrom, fid ito, fid jto, int *h
 }
 static int is_possible_rook_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hints)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
-	if ((board[ito][jto] != PIECE_NONE) && (board[ito][jto] & COLORMASK) == c)
+	color_t c = position[ifrom][jfrom] & COLORMASK;
+	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints) {
@@ -128,13 +132,13 @@ static int is_possible_rook_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 
 	if (ito - ifrom == 0) { /* vertically */
 		for (int j = MIN(jfrom, jto) + 1; j < MAX(jfrom, jto); ++j) {
-			if ((board[ifrom][j] & PIECEMASK) != PIECE_NONE)
+			if ((position[ifrom][j] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
 		return 1;
 	} else if (jto - jfrom == 0) { /* horizontally */
 		for (int i = MIN(jfrom, jto) + 1; i < MAX(jfrom, jto); ++i) {
-			if ((board[i][jfrom] & PIECEMASK) != PIECE_NONE)
+			if ((position[i][jfrom] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
 		return 1;
@@ -144,8 +148,8 @@ static int is_possible_rook_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 }
 static int is_possible_bishop_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hints)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
-	if ((board[ito][jto] != PIECE_NONE) && (board[ito][jto] & COLORMASK) == c)
+	color_t c = position[ifrom][jfrom] & COLORMASK;
+	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -159,7 +163,7 @@ static int is_possible_bishop_move(fid ifrom, fid jfrom, fid ito, fid jto, int *
 	for (int k = 1; k < abs(ito - ifrom); ++k) {
 		int i = ifrom + vi * k;
 		int j = jfrom + vj * k;
-		if ((board[i][j] & PIECEMASK) != PIECE_NONE)
+		if ((position[i][j] & PIECEMASK) != PIECE_NONE)
 			return 0;
 	}
 
@@ -167,8 +171,8 @@ static int is_possible_bishop_move(fid ifrom, fid jfrom, fid ito, fid jto, int *
 }
 static int is_possible_knight_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hints)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
-	if ((board[ito][jto] != PIECE_NONE) && (board[ito][jto] & COLORMASK) == c)
+	color_t c = position[ifrom][jfrom] & COLORMASK;
+	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -181,8 +185,8 @@ static int is_possible_knight_move(fid ifrom, fid jfrom, fid ito, fid jto, int *
 }
 static int is_possible_pawn_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hints)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
-	if ((board[ito][jto] != PIECE_NONE) && (board[ito][jto] & COLORMASK) == c)
+	color_t c = position[ifrom][jfrom] & COLORMASK;
+	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -195,14 +199,14 @@ static int is_possible_pawn_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 	int promrow = (1 - c) * (NF - 1);
 	int pawnrow = c * (NF - 2) + (1 - c);
 	if (dj == step && di == 0) { /* normal step */
-		if ((board[ito][jto] & PIECEMASK) == PIECE_NONE) {
+		if ((position[ito][jto] & PIECEMASK) == PIECE_NONE) {
 			if (hints && jto == promrow)
 				*hints |= HINT_PROMOTION;
 			return 1;
 		}
 	} else if (dj == step && abs(di) == 1) { /* diagonal step with take */
-		if ((board[ito][jto] & PIECEMASK) != PIECE_NONE
-				&& (board[ito][jto] & COLORMASK) != c) {
+		if ((position[ito][jto] & PIECEMASK) != PIECE_NONE
+				&& (position[ito][jto] & COLORMASK) != c) {
 			if (hints && jto == promrow)
 				*hints |= HINT_PROMOTION;
 			return 1;
@@ -212,8 +216,8 @@ static int is_possible_pawn_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 			return 1;
 		}
 	} else if (jfrom == pawnrow && dj == 2 * step && di == 0) { /* 2 field step from pawnrow */
-		if ((board[ito][jto - step] & PIECEMASK) == PIECE_NONE
-				&& (board[ito][jto] & PIECEMASK) == PIECE_NONE) {
+		if ((position[ito][jto - step] & PIECEMASK) == PIECE_NONE
+				&& (position[ito][jto] & PIECEMASK) == PIECE_NONE) {
 			if (hints)
 				*hints |= HINT_SET_EN_PASSANT_FIELD;
 			return 1;
@@ -244,8 +248,8 @@ static void get_king(color_t c, fid *i, fid *j)
 {
 	for (fid l = 0; l < NF; ++l) {
 		for (fid k = 0; k < NF; ++k) {
-			if ((board[k][l] & PIECEMASK) == PIECE_KING
-					&& (board[k][l] & COLORMASK) == c) {
+			if ((position[k][l] & PIECEMASK) == PIECE_KING
+					&& (position[k][l] & COLORMASK) == c) {
 				*i = k;
 				*j = l;
 				return;
@@ -257,12 +261,12 @@ static int is_king_in_check(color_t c, fid iking, fid jking)
 {
 	for (fid j = 0; j < NF; ++j) {
 		for (fid i = 0; i < NF; ++i) {
-			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & PIECEMASK) == PIECE_KING
-					|| (board[i][j] & COLORMASK) == c)
+			if ((position[i][j] & PIECEMASK) == PIECE_NONE
+					|| (position[i][j] & PIECEMASK) == PIECE_KING
+					|| (position[i][j] & COLORMASK) == c)
 				continue;
 
-			piece_t p = board[i][j] & PIECEMASK;
+			piece_t p = position[i][j] & PIECEMASK;
 			if (is_possible_non_king_move(p, i, j, iking, jking, NULL))
 				return 1;
 		}
@@ -271,8 +275,8 @@ static int is_king_in_check(color_t c, fid iking, fid jking)
 }
 static int is_possible_king_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hints)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
-	if ((board[ito][jto] != PIECE_NONE) && (board[ito][jto] & COLORMASK) == c)
+	color_t c = position[ifrom][jfrom] & COLORMASK;
+	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints) {
@@ -287,8 +291,8 @@ static int is_possible_king_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 		return 1;
 	} else if (ito == NF - 2 && (jto == 0 || jto == NF - 1)
 			&& (castlerights[c] & CASTLERIGHT_KINGSIDE)) {
-		if ((board[NF - 2][jto] & PIECEMASK) != PIECE_NONE
-				|| (board[NF - 3][jto] & PIECEMASK) != PIECE_NONE)
+		if ((position[NF - 2][jto] & PIECEMASK) != PIECE_NONE
+				|| (position[NF - 3][jto] & PIECEMASK) != PIECE_NONE)
 			return 0;
 
 		if (is_king_in_check(c, ifrom, jfrom))
@@ -299,9 +303,9 @@ static int is_possible_king_move(fid ifrom, fid jfrom, fid ito, fid jto, int *hi
 		return 1;
 	} else if (ito == 2 && (jto == 0 || jto == NF - 1)
 			&& (castlerights[c] & CASTLERIGHT_QUEENSIDE)) {
-		if ((board[1][jto] & PIECEMASK) != PIECE_NONE
-				|| (board[2][jto] & PIECEMASK) != PIECE_NONE
-				|| (board[3][jto] & PIECEMASK) != PIECE_NONE)
+		if ((position[1][jto] & PIECEMASK) != PIECE_NONE
+				|| (position[2][jto] & PIECEMASK) != PIECE_NONE
+				|| (position[3][jto] & PIECEMASK) != PIECE_NONE)
 			return 0;
 
 		if (is_king_in_check(c, ifrom, jfrom))
@@ -325,58 +329,61 @@ static int is_possible_move(piece_t piece, fid ifrom, fid jfrom, fid ito, fid jt
 
 static int exec_ply(fid ifrom, fid jfrom, fid ito, fid jto, int hints, piece_t prompiece)
 {
-	color_t c = board[ifrom][jfrom] & COLORMASK;
+	color_t c = position[ifrom][jfrom] & COLORMASK;
 
 	plyinfo_t ply;
-	ply.p = board[ifrom][jfrom] & PIECEMASK;
+	memset(&ply, 0, sizeof(ply));
+	ply.p = position[ifrom][jfrom] & PIECEMASK;
 	ply.from[0] = ifrom;
 	ply.from[1] = jfrom;
 	ply.to[0] = ito;
 	ply.to[1] = jto;
-	ply.taken = board[ito][jto];
+	ply.taken = position[ito][jto];
 	ply.prompiece = prompiece;
-	ply.ndrawmoves = num_drawish_moves;
 	memcpy(ply.fep, fep, sizeof(fep));
+	memcpy(ply.castlerights, castlerights, sizeof(ply.castlerights));
+	memcpy(ply.position, position, sizeof(ply.position));
+	ply.ndrawplies = num_drawish_plies;
 	ply.hints = hints;
 	memset(updates, 0xff, 2 * NUM_UPDATES_MAX * sizeof(fid));
 
 	/* apply bare move */
-	board[ito][jto] = board[ifrom][jfrom];
+	position[ito][jto] = position[ifrom][jfrom];
 	memcpy(updates[0], ply.from, sizeof(updates[0]));
 
-	board[ifrom][jfrom] = PIECE_NONE;
+	position[ifrom][jfrom] = PIECE_NONE;
 	memcpy(updates[1], ply.to, sizeof(updates[0]));
 
 	/* apply hints */
 	if (hints & HINT_CASTLE) {
 		if (ito > ifrom) {
-			board[NF - 3][jfrom] = board[NF - 1][jfrom];
+			position[NF - 3][jfrom] = position[NF - 1][jfrom];
 			updates[2][0] = NF - 3;
 			updates[2][1] = jfrom;
 
-			board[NF - 1][jfrom] = PIECE_NONE;
+			position[NF - 1][jfrom] = PIECE_NONE;
 			updates[3][0] = NF - 1;
 			updates[3][1] = jfrom;
 		} else {
-			board[3][jfrom] = board[0][jfrom];
+			position[3][jfrom] = position[0][jfrom];
 			updates[2][0] = 3;
 			updates[2][1] = jfrom;
 
-			board[0][jfrom] = PIECE_NONE;
+			position[0][jfrom] = PIECE_NONE;
 			updates[3][0] = 0;
 			updates[3][1] = jfrom;
 		}
 	} else if (hints & HINT_EN_PASSANT) {
-		ply.taken = board[ito][jfrom];
+		ply.taken = position[ito][jfrom];
 
-		board[ito][jfrom] = PIECE_NONE;
+		position[ito][jfrom] = PIECE_NONE;
 		updates[2][0] = ito;
 		updates[2][1] = jfrom;
 	} else if (hints & HINT_SET_EN_PASSANT_FIELD) {
 		fep[0] = ifrom;
 		fep[1] = (jfrom + jto) / 2;
 	} else if (hints & HINT_PROMOTION) {
-		board[ito][jto] = (board[ito][jto] & COLORMASK) | prompiece;
+		position[ito][jto] = (position[ito][jto] & COLORMASK) | prompiece;
 	}
 
 	if (hints & HINT_DEL_CASTLERIGHT_QUEENSIDE)
@@ -386,9 +393,9 @@ static int exec_ply(fid ifrom, fid jfrom, fid ito, fid jto, int hints, piece_t p
 
 	/* count move for fifty-move rule */
 	if ((ply.taken & PIECEMASK) == PIECE_NONE && ply.p != PIECE_PAWN) {
-		++num_drawish_moves;
+		++num_drawish_plies;
 	} else {
-		num_drawish_moves = 0;
+		num_drawish_plies = 0;
 	}
 
 	/* add move to list */
@@ -411,14 +418,14 @@ static void undo_last_ply()
 	fid jfrom = ply.from[1];
 	fid ito = ply.to[0];
 	fid jto = ply.to[1];
-	color_t c = board[ito][jto] & COLORMASK;
+	color_t c = position[ito][jto] & COLORMASK;
 	/* fill updates with -1 */
 	memset(updates, 0xff, 2 * NUM_UPDATES_MAX * sizeof(fid));
 	/* remove ply from list */
 	--pliesnum;
 
 	/* restore fifty-move rule count */
-	num_drawish_moves = ply.ndrawmoves;
+	num_drawish_plies = ply.ndrawplies;
 
 	/* undo hints */
 	if (ply.hints & HINT_DEL_CASTLERIGHT_QUEENSIDE)
@@ -428,45 +435,45 @@ static void undo_last_ply()
 
 	if (ply.hints & HINT_CASTLE) {
 		if (ito > ifrom) {
-			board[NF - 1][jfrom] = board[NF - 3][jfrom];
+			position[NF - 1][jfrom] = position[NF - 3][jfrom];
 			updates[3][0] = NF - 1;
 			updates[3][1] = jfrom;
 
-			board[NF - 3][jfrom] = PIECE_NONE;
+			position[NF - 3][jfrom] = PIECE_NONE;
 			updates[2][0] = NF - 3;
 			updates[2][1] = jfrom;
 
 		} else {
-			board[0][jfrom] = board[3][jfrom];
+			position[0][jfrom] = position[3][jfrom];
 			updates[3][0] = 0;
 			updates[3][1] = jfrom;
 
-			board[3][jfrom] = PIECE_NONE;
+			position[3][jfrom] = PIECE_NONE;
 			updates[2][0] = 3;
 			updates[2][1] = jfrom;
 		}
 	} else if (ply.hints & HINT_EN_PASSANT) {
-		board[ito][jfrom] = ply.taken;
+		position[ito][jfrom] = ply.taken;
 		updates[2][0] = jto;
 		updates[2][1] = jfrom;
 	} else if (ply.hints & HINT_SET_EN_PASSANT_FIELD) {
 		memcpy(fep, ply.fep, sizeof(fep));
 	} else if (ply.hints & HINT_PROMOTION) {
-		board[ito][jto] = (board[ito][jto] & COLORMASK) | PIECE_PAWN;
+		position[ito][jto] = (position[ito][jto] & COLORMASK) | PIECE_PAWN;
 	}
 
 	/* undo bare move */
-	board[ifrom][jfrom] = board[ito][jto];
+	position[ifrom][jfrom] = position[ito][jto];
 	memcpy(updates[1], ply.from, sizeof(updates[1]));
 
-	board[ito][jto] = (ply.hints & HINT_EN_PASSANT) ? PIECE_NONE : ply.taken;
+	position[ito][jto] = (ply.hints & HINT_EN_PASSANT) ? PIECE_NONE : ply.taken;
 	memcpy(updates[1], ply.to, sizeof(updates[0]));
 }
 
 static int piece_has_legal_move(fid ipiece, fid jpiece)
 {
-	piece_t p = board[ipiece][jpiece] & PIECEMASK;
-	color_t c = board[ipiece][jpiece] & COLORMASK;
+	piece_t p = position[ipiece][jpiece] & PIECEMASK;
+	color_t c = position[ipiece][jpiece] & COLORMASK;
 	fid iking, jking;
 	if (p != PIECE_KING)
 		get_king(c, &iking, &jking);
@@ -500,8 +507,8 @@ static int has_legal_move(color_t color)
 {
 	for (fid j = 0; j < NF; ++j) {
 		for (fid i = 0; i < NF; ++i) {
-			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & COLORMASK) != color)
+			if ((position[i][j] & PIECEMASK) == PIECE_NONE
+					|| (position[i][j] & COLORMASK) != color)
 				continue;
 			if (piece_has_legal_move(i, j))
 				return 1;
@@ -525,16 +532,16 @@ int game_init(void)
 	pawnrows[1] = NF - 2;
 
 	for (int j = 0; j < NUM_COLORS; ++j) {
-		board[0][piecerows[j]] = PIECE_ROOK | j;
-		board[1][piecerows[j]] = PIECE_KNIGHT | j;
-		board[2][piecerows[j]] = PIECE_BISHOP | j;
-		board[3][piecerows[j]] = PIECE_QUEEN | j;
-		board[4][piecerows[j]] = PIECE_KING | j;
-		board[5][piecerows[j]] = PIECE_BISHOP | j;
-		board[6][piecerows[j]] = PIECE_KNIGHT | j;
-		board[7][piecerows[j]] = PIECE_ROOK | j;
+		position[0][piecerows[j]] = PIECE_ROOK | j;
+		position[1][piecerows[j]] = PIECE_KNIGHT | j;
+		position[2][piecerows[j]] = PIECE_BISHOP | j;
+		position[3][piecerows[j]] = PIECE_QUEEN | j;
+		position[4][piecerows[j]] = PIECE_KING | j;
+		position[5][piecerows[j]] = PIECE_BISHOP | j;
+		position[6][piecerows[j]] = PIECE_KNIGHT | j;
+		position[7][piecerows[j]] = PIECE_ROOK | j;
 		for (int i = 0; i < NF; ++i) {
-			board[i][pawnrows[j]] = PIECE_PAWN | j;
+			position[i][pawnrows[j]] = PIECE_PAWN | j;
 		}
 	}
 
@@ -551,9 +558,9 @@ void game_init_test_board(void)
 	castlerights[0] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
 	castlerights[1] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
 
-	board[4][0] = PIECE_KING | COLOR_WHITE;
-	board[4][NF - 1] = PIECE_KING | COLOR_BLACK;
-	board[0][6] = PIECE_PAWN;
+	position[4][0] = PIECE_KING | COLOR_WHITE;
+	position[4][NF - 1] = PIECE_KING | COLOR_BLACK;
+	position[0][6] = PIECE_PAWN;
 }
 void game_terminate(void)
 {
@@ -562,7 +569,7 @@ void game_terminate(void)
 
 int game_exec_ply(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece)
 {
-	piece_t piece = board[ifrom][jfrom] & PIECEMASK;
+	piece_t piece = position[ifrom][jfrom] & PIECEMASK;
 
 	/* check if move is possible */
 	int hints;
@@ -600,17 +607,17 @@ color_t game_get_moving_color()
 }
 piece_t game_get_piece(fid i, fid j)
 {
-	return board[i][j] & PIECEMASK;
+	return position[i][j] & PIECEMASK;
 }
 color_t game_get_color(fid i, fid j)
 {
-	return board[i][j] & COLORMASK;
+	return position[i][j] & COLORMASK;
 }
 fieldinfo_t game_get_fieldinfo(fid i, fid j)
 {
-	return board[i][j];
+	return position[i][j];
 }
-int game_get_move_number()
+int game_get_move_number(void)
 {
 	return pliesnum / 2;
 }
@@ -624,8 +631,8 @@ int game_is_stalemate(void)
 
 	for (fid j = 0; j < NF; ++j) {
 		for (fid i = 0; i < NF; ++i) {
-			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & COLORMASK) != moving_color)
+			if ((position[i][j] & PIECEMASK) == PIECE_NONE
+					|| (position[i][j] & COLORMASK) != moving_color)
 				continue;
 			if (piece_has_legal_move(i, j))
 				return 0;
@@ -644,8 +651,8 @@ int game_is_checkmate(void)
 
 	for (fid j = 0; j < NF; ++j) {
 		for (fid i = 0; i < NF; ++i) {
-			if ((board[i][j] & PIECEMASK) == PIECE_NONE
-					|| (board[i][j] & COLORMASK) != moving_color)
+			if ((position[i][j] & PIECEMASK) == PIECE_NONE
+					|| (position[i][j] & COLORMASK) != moving_color)
 				continue;
 			if (piece_has_legal_move(i, j))
 				return 0;
@@ -656,42 +663,107 @@ int game_is_checkmate(void)
 }
 int game_is_movable_piece_at(fid i, fid j)
 {
-	return ((board[i][j] & PIECEMASK) != PIECE_NONE)
-		&& (board[i][j] & COLORMASK) == moving_color;
+	return ((position[i][j] & PIECEMASK) != PIECE_NONE)
+		&& (position[i][j] & COLORMASK) == moving_color;
 }
-status_t game_get_status(int timeout)
+int game_has_sufficient_mating_material(color_t color)
 {
-	if (timeout) {
-		if (moving_color == COLOR_WHITE) {
-			return STATUS_TIMEOUT_WHITE;
-		} else {
-			return STATUS_TIMEOUT_BLACK;
+	int hasking = 0;
+	int nbishops = 0;
+	int nknights = 0;
+	for (int j = 0; j < NF; ++j) {
+		for (int i = 0; i < NF; ++i) {
+			switch (position[i][j]) {
+			case PIECE_KING:
+				hasking = 1;
+				break;
+			case PIECE_QUEEN:
+				return 1;
+			case PIECE_ROOK:
+				return 1;
+			case PIECE_BISHOP:
+				++nbishops;
+			case PIECE_KNIGHT:
+				++nknights;
+			case PIECE_PAWN:
+				return 1;
+			}
 		}
 	}
+	assert(hasking);
 
+	if (nbishops + nknights > 1)
+		return 1;
+	return 0;
+}
+void game_get_status(status_t *externstatus)
+{
+	/* surrender? */
+	if (*externstatus == STATUS_SURRENDER_WHITE || *externstatus == STATUS_SURRENDER_BLACK)
+		return;
+
+	/* timeout? */
+	if (*externstatus == STATUS_TIMEOUT_WHITE) {
+		*externstatus = game_has_sufficient_mating_material(COLOR_BLACK) ?
+			*externstatus : STATUS_DRAW_MATERIAL_VS_TIMEOUT;
+		return;
+	} else if (*externstatus == STATUS_TIMEOUT_BLACK) {
+		*externstatus = game_has_sufficient_mating_material(COLOR_WHITE) ?
+			*externstatus : STATUS_DRAW_MATERIAL_VS_TIMEOUT;
+		return;
+	}
+
+	assert(*externstatus == STATUS_MOVING_WHITE || *externstatus == STATUS_MOVING_BLACK);
+
+	/* check- or stalemate? */
 	if (!has_legal_move(moving_color)) {
 		fid iking, jking;
 		get_king(moving_color, &iking, &jking);
 
 		if (is_king_in_check(moving_color, iking, jking)) {
-			return moving_color ? STATUS_CHECKMATE_BLACK
-				: STATUS_CHECKMATE_WHITE;
+			*externstatus = moving_color ?
+				STATUS_CHECKMATE_BLACK : STATUS_CHECKMATE_WHITE;
 		} else {
-			return STATUS_DRAW_STALEMATE;
+			*externstatus = STATUS_DRAW_STALEMATE;
+		}
+		return;
+	}
+
+	/* draw by insufficient material? */
+	if (!game_has_sufficient_mating_material(COLOR_WHITE)
+			&& !game_has_sufficient_mating_material(COLOR_BLACK)) {
+		*externstatus = STATUS_DRAW_MATERIAL;
+		return;
+	}
+
+	/* draw by repetition? */
+	/* TODO: Adapt to official rules */
+	/* TODO: maybe optimize: https://www.chessprogramming.org/Repetitions */
+	for (int i = 0; i < pliesnum; ++i) {
+		int n = 0;
+		for (int j = i + 1; j < pliesnum; ++j) {
+			if (memcmp(plies[i].position, plies[j].position,
+						sizeof(plies[i].position)) == 0
+					&& memcmp(plies[i].fep, plies[j].fep,
+						sizeof(plies[i].fep)) == 0
+					&& memcmp(plies[i].castlerights, plies[j].castlerights,
+						sizeof(plies[i].castlerights)) == 0)
+				++n;
+		}
+		if (n >= 2) {
+			*externstatus = STATUS_DRAW_REPETITION;
+			return;
 		}
 	}
 
-	//int n = 0;
-	//for (moveinfo_t *m = movelast; m; m = m->prev) {
-	//	if (memcmp(m->posid, board, POSIDSIZE) == 0) {
-	//		printf("equal\n");
-	//		++n;
-	//	}
-	//}
-	//if (n >= 3)
-	//	return STATUS_DRAW_REPETITION;
+	/* draw by fifty move rule? */
+	if (num_drawish_plies >= DRAWISH_MOVES_MAX * 2) {
+		*externstatus = STATUS_DRAW_FIFTY_MOVES;
+		return;
+	}
 
-	return moving_color ? STATUS_MOVING_BLACK : STATUS_MOVING_WHITE;
+	/* just moving */
+	*externstatus = moving_color ? STATUS_MOVING_BLACK : STATUS_MOVING_WHITE;
 }
 void game_get_updates(fid u[][2])
 {
@@ -740,14 +812,14 @@ void print_board(void)
 {
 	for (int j = NF - 1; j >= 0; --j) {
 		for (int i = 0; i < NF; ++i) {
-			piece_t piece = board[i][j] & PIECEMASK;
+			piece_t piece = position[i][j] & PIECEMASK;
 			if (piece == PIECE_NONE) {
 				printf("  ");
 				continue;
 			}
 
 			int p = PIECE_IDX(piece);
-			char c = (board[i][j] & COLORMASK) ?
+			char c = (position[i][j] & COLORMASK) ?
 				piece_chars[p] : toupper(piece_chars[p]);
 			printf("%c ", c);
 		}

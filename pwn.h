@@ -84,36 +84,36 @@ enum piece_t {
 	PIECE_PAWN = 12,
 };
 
-#define STATMSG_NAME_MAXLEN 14
-const static char *statmsg_names[] = {
-	"movingwhite",
-	"movingblack"
-	"checkmatewhite"
-	"checkmateblack",
-	"surrenderwhite",
-	"surrenderblack",
-	"timeoutwhite",
-	"timeoutblack",
-	"drawmaterial"
-	"drawstalemate",
-	"drawrepitition",
-	"drawmaterialvstimeout",
-	"drawfiftymove",
-};
 enum status_t {
 	STATUS_MOVING_WHITE,
 	STATUS_MOVING_BLACK,
 	STATUS_CHECKMATE_WHITE,
 	STATUS_CHECKMATE_BLACK,
-	STATUS_SURRENDER_WHITE,
-	STATUS_SURRENDER_BLACK,
-	STATUS_TIMEOUT_WHITE,
-	STATUS_TIMEOUT_BLACK,
 	STATUS_DRAW_MATERIAL,
 	STATUS_DRAW_STALEMATE,
 	STATUS_DRAW_REPETITION,
-	STATUS_DRAW_MATERIAL_VS_TIMEOUT,
 	STATUS_DRAW_FIFTY_MOVES,
+	STATUS_TIMEOUT_WHITE,
+	STATUS_TIMEOUT_BLACK,
+	STATUS_DRAW_MATERIAL_VS_TIMEOUT,
+	STATUS_SURRENDER_WHITE,
+	STATUS_SURRENDER_BLACK,
+};
+#define STATMSG_NAME_MAXLEN 14
+const static char *statmsg_names[] = {
+	"movingwhite",
+	"movingblack",
+	"checkmatewhite",
+	"checkmateblack",
+	"drawmaterial",
+	"drawstalemate",
+	"drawrepitition",
+	"drawfiftymove",
+	"timeoutwhite",
+	"timeoutblack",
+	"drawmaterialvstimeout",
+	"surrenderwhite",
+	"surrenderblack",
 };
 #define STATMSG_TEXTS_MAXLEN 49
 const static char *statmsg_texts[] = {
@@ -121,15 +121,15 @@ const static char *statmsg_texts[] = {
 	"It is Black to move",
 	"Black won by checkmate",
 	"White won by checkmate",
-	"Black won by surrender",
-	"White won by surrender",
-	"Black won by timeout",
-	"White won by timeout",
 	"Draw by insufficient material",
 	"Draw by stalemate",
 	"Draw by threefold repetition",
-	"Draw by timeout vs insufficient material",
 	"Draw by fifty move rule",
+	"Black won by timeout",
+	"White won by timeout",
+	"Draw by timeout vs insufficient material",
+	"Black won by surrender",
+	"White won by surrender",
 };
 
 #define PIECENAME_BUF_SIZE 16

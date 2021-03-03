@@ -33,7 +33,7 @@ int game_exec_ply(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece);
 void game_undo_move(plyinfo_t *m);
 
 int game_is_movable_piece_at(fid i, fid j);
-status_t game_get_status(int timeout);
+void game_get_status(status_t *externstatus);
 
 color_t game_get_moving_color(void);
 piece_t game_get_piece(fid i, fid j);
