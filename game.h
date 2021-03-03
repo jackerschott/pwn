@@ -29,17 +29,17 @@ int game_init(void);
 void game_init_test_board(void);
 void game_terminate(void);
 
-int game_exec_ply(fid ifrom, fid jfrom, fid ito, fid jto, piece_t prompiece);
+int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece);
 void game_undo_move(plyinfo_t *m);
 
-int game_is_movable_piece_at(fid i, fid j);
+int game_is_movable_piece_at(sqid i, sqid j);
 void game_get_status(status_t *externstatus);
 
 color_t game_get_moving_color(void);
-piece_t game_get_piece(fid i, fid j);
-color_t game_get_color(fid i, fid j);
-fieldinfo_t game_get_fieldinfo(fid i, fid j);
-void game_get_updates(fid u[][2]);
+piece_t game_get_piece(sqid i, sqid j);
+color_t game_get_color(sqid i, sqid j);
+squareinfo_t game_get_squareinfo(sqid i, sqid j);
+void game_get_updates(sqid u[][2]);
 int game_get_move_number();
 
 int game_save_board(const char *fname);

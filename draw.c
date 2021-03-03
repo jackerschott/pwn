@@ -43,11 +43,11 @@ color palette_dark_piece[] = {
 	COLOR(0xff, 0xff, 0xff, 0xff),
 	COLOR(0x00, 0x00, 0x00, 0xff),
 };
-color palette_light_field[] = {
+color palette_light_square[] = {
 	COLOR(0xf0, 0xd9, 0xb5, 0xff),
 	COLOR(0x80, 0xff, 0x00, 0x80),
 };
-color palette_dark_field[] = {
+color palette_dark_square[] = {
 	COLOR(0xb5, 0x88, 0x63, 0xff),
 	COLOR(0x80, 0xff, 0x00, 0x80),
 };
@@ -643,15 +643,15 @@ void draw_clear()
 	cairo_paint(cr);
 }
 
-void draw_field(double x, double y, double size, int palette, int selected)
+void draw_square(double x, double y, double size, int palette, int selected)
 {
 	color d, s;
 	if (palette == PALETTE_LIGHT) {
-		d = palette_light_field[FIELD_COLOR_DEFAULT];
-		s = palette_light_field[FIELD_COLOR_SELECTED];
+		d = palette_light_square[FIELD_COLOR_DEFAULT];
+		s = palette_light_square[FIELD_COLOR_SELECTED];
 	} else {
-		d = palette_dark_field[FIELD_COLOR_DEFAULT];
-		s = palette_dark_field[FIELD_COLOR_SELECTED];
+		d = palette_dark_square[FIELD_COLOR_DEFAULT];
+		s = palette_dark_square[FIELD_COLOR_SELECTED];
 	}
 	cairo_pattern_t *def = cairo_pattern_create_rgba(d.r, d.g, d.b, d.a);
 	cairo_pattern_t *sel = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);

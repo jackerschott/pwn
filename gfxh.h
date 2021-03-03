@@ -63,8 +63,8 @@ struct event_init {
 struct event_playmove {
 	int type;
 	piece_t piece;
-	fid from[2];
-	fid to[2];
+	sqid from[2];
+	sqid to[2];
 	piece_t prompiece;
 	long tmove;
 	long tstamp;

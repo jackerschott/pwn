@@ -151,8 +151,8 @@ static const char piece_symbols[] = {
 
 typedef enum color_t color_t;
 typedef enum piece_t piece_t;
-typedef int fid;
-typedef int fieldinfo_t;
+typedef int sqid;
+typedef int squareinfo_t;
 typedef enum status_t status_t;
 
 #endif /* CHESS_H */

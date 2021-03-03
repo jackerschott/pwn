@@ -13,13 +13,13 @@
 #define TSTAMP_MAXLEN (STRLEN("1970-01-01 00:00:00.000000000"))
 #define TSTAMP_COARSE_MAXLEN (STRLEN("1970-01-01 00:00:00"))
 
-size_t format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char *str);
+size_t format_move(piece_t piece, sqid from[2], sqid to[2], piece_t prompiece, char *str);
 size_t format_timeinterval(long t, char *str, int coarse);
 size_t format_timestamp(long t, char *s, int coarse);
 
 char *parse_number(const char *s, long *n);
 char *parse_move(const char *s, piece_t *piece,
-		fid from[2], fid to[2], piece_t *prompiece);
+		sqid from[2], sqid to[2], piece_t *prompiece);
 char *parse_timeinterval(const char *s, long *t, int onlycoarse);
 char *parse_timestamp(const char *s, long *t);
 

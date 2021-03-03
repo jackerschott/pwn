@@ -43,16 +43,16 @@
 
 #define FIGURE(p) ((p) / 2 - 1)
 #define PALETTE(c) (c)
-#define XTOI(x, xorig, fieldsize, c) \
-	((1 - (c)) * (int)(((x) - xorig) / fieldsize) \
-	+ (c) * (NF - (int)(((x) - xorig) / fieldsize) - 1))
-#define YTOJ(y, yorig, fieldsize, c) \
-	((1 - c) * ((NF - 1) - (int)(((y) - yorig) / fieldsize)) \
-	+ (c) * (int)(((y) - yorig) / fieldsize))
-#define ITOX(i, xorig, fieldsize, c) \
-	(xorig + ((1 - (c)) * (i) + (c) * (NF - (i) - 1)) * fieldsize)
-#define JTOY(j, yorig, fieldsize, c) \
-	(yorig + ((1 - (c)) * (NF - (j) - 1) + (c) * (j)) * fieldsize)
+#define XTOI(x, xorig, squaresize, c) \
+	((1 - (c)) * (int)(((x) - xorig) / squaresize) \
+	+ (c) * (NF - (int)(((x) - xorig) / squaresize) - 1))
+#define YTOJ(y, yorig, squaresize, c) \
+	((1 - c) * ((NF - 1) - (int)(((y) - yorig) / squaresize)) \
+	+ (c) * (int)(((y) - yorig) / squaresize))
+#define ITOX(i, xorig, squaresize, c) \
+	(xorig + ((1 - (c)) * (i) + (c) * (NF - (i) - 1)) * squaresize)
+#define JTOY(j, yorig, squaresize, c) \
+	(yorig + ((1 - (c)) * (NF - (j) - 1) + (c) * (j)) * squaresize)
 
 #define INITMSG_PREFIX "init"
 #define MOVEMSG_PREFIX "move"
@@ -101,13 +101,13 @@ struct gameinfo_t {
 struct gameinfo_t ginfo;
 long nupdates;
 
-static fid selfield[2];
+static sqid selsquare[2];
 static struct {
 	cairo_surface_t *surface;
 	double xorig;
 	double yorig;
 	double size;
-	double fieldsize;
+	double squaresize;
 } board;
 
 static Display *dpy;
@@ -612,7 +612,7 @@ static int prompt_promotion_piece(piece_t *p)
 	*p = PIECE_BY_IDX(i);
 	return 0;
 }
-static int move(fid from[2], fid to[2], piece_t *piece, piece_t *prompiece)
+static int move(sqid from[2], sqid to[2], piece_t *piece, piece_t *prompiece)
 {
 	*prompiece = PIECE_NONE;
 
@@ -642,10 +642,10 @@ static int move(fid from[2], fid to[2], piece_t *piece, piece_t *prompiece)
 
 	return 0;
 }
-static int apply_move(fid f[2], fid updates[NUM_UPDATES_MAX][2])
+static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 {
 	piece_t piece, prompiece;
-	int err = move(selfield, f, &piece, &prompiece);
+	int err = move(selsquare, f, &piece, &prompiece);
 	if (err == -1) {
 		SYSERR();
 		gfxh_cleanup();
@@ -661,7 +661,7 @@ static int apply_move(fid f[2], fid updates[NUM_UPDATES_MAX][2])
 	memset(&e, 0, sizeof(e));
 	e.playmove.type = EVENT_PLAYMOVE;
 	e.playmove.piece = piece;
-	memcpy(e.playmove.from, selfield, sizeof(e.playmove.from));
+	memcpy(e.playmove.from, selsquare, sizeof(e.playmove.from));
 	memcpy(e.playmove.to, f, sizeof(e.playmove.to));
 	e.playmove.prompiece = prompiece;
 	e.playmove.tmove = tmove;
@@ -714,16 +714,16 @@ static int apply_move(fid f[2], fid updates[NUM_UPDATES_MAX][2])
 	return 0;
 }
 
-static void selectf(fid f[2])
+static void selectf(sqid f[2])
 {
 	pthread_mutex_lock(&hctx->xlock);
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
 
-	double fx = ITOX(f[0], board.xorig, board.fieldsize, ginfo.selfcolor);
-	double fy = JTOY(f[1], board.yorig, board.fieldsize, ginfo.selfcolor);
+	double fx = ITOX(f[0], board.xorig, board.squaresize, ginfo.selfcolor);
+	double fy = JTOY(f[1], board.yorig, board.squaresize, ginfo.selfcolor);
 	pthread_mutex_lock(&hctx->xlock);
-	draw_field(fx, fy, board.fieldsize, 1 - (f[0] + f[1]) % 2, 1);
+	draw_square(fx, fy, board.squaresize, 1 - (f[0] + f[1]) % 2, 1);
 	pthread_mutex_unlock(&hctx->xlock);
 
 	pthread_mutex_lock(&hctx->gamelock);
@@ -735,7 +735,7 @@ static void selectf(fid f[2])
 		pthread_mutex_unlock(&hctx->gamelock);
 
 		pthread_mutex_lock(&hctx->xlock);
-		draw_piece(fx, fy, board.fieldsize, FIGURE(piece), PALETTE(color));
+		draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
 		pthread_mutex_unlock(&hctx->xlock);
 	}
 
@@ -743,7 +743,7 @@ static void selectf(fid f[2])
 	draw_commit();
 	pthread_mutex_unlock(&hctx->xlock);
 
-	memcpy(selfield, f, 2 * sizeof(fid));
+	memcpy(selsquare, f, 2 * sizeof(sqid));
 }
 static void unselectf(void)
 {
@@ -751,22 +751,22 @@ static void unselectf(void)
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
 
-	double fx = ITOX(selfield[0], board.xorig, board.fieldsize, ginfo.selfcolor);
-	double fy = JTOY(selfield[1], board.yorig, board.fieldsize, ginfo.selfcolor);
+	double fx = ITOX(selsquare[0], board.xorig, board.squaresize, ginfo.selfcolor);
+	double fy = JTOY(selsquare[1], board.yorig, board.squaresize, ginfo.selfcolor);
 	pthread_mutex_lock(&hctx->xlock);
-	draw_field(fx, fy, board.fieldsize, 1 - (selfield[0] + selfield[1]) % 2, 0);
+	draw_square(fx, fy, board.squaresize, 1 - (selsquare[0] + selsquare[1]) % 2, 0);
 	pthread_mutex_unlock(&hctx->xlock);
 
 	pthread_mutex_lock(&hctx->gamelock);
-	piece_t piece = game_get_piece(selfield[0], selfield[1]);
+	piece_t piece = game_get_piece(selsquare[0], selsquare[1]);
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (piece) {
 		pthread_mutex_lock(&hctx->gamelock);
-		color_t color = game_get_color(selfield[0], selfield[1]);
+		color_t color = game_get_color(selsquare[0], selsquare[1]);
 		pthread_mutex_unlock(&hctx->gamelock);
 
 		pthread_mutex_lock(&hctx->xlock);
-		draw_piece(fx, fy, board.fieldsize, FIGURE(piece), PALETTE(color));
+		draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
 		pthread_mutex_unlock(&hctx->xlock);
 	}
 
@@ -774,9 +774,9 @@ static void unselectf(void)
 	draw_commit();
 	pthread_mutex_unlock(&hctx->xlock);
 
-	memset(selfield, 0xff, 2 * sizeof(fid));
+	memset(selsquare, 0xff, 2 * sizeof(sqid));
 }
-static void show(fid updates[][2])
+static void show(sqid updates[][2])
 {
 	double fx, fy;
 
@@ -787,10 +787,10 @@ static void show(fid updates[][2])
 		int i = updates[k][0];
 		int j = updates[k][1];
 
-		double fx = ITOX(i, board.xorig, board.fieldsize, ginfo.selfcolor);
-		double fy = JTOY(j, board.yorig, board.fieldsize, ginfo.selfcolor);
+		double fx = ITOX(i, board.xorig, board.squaresize, ginfo.selfcolor);
+		double fy = JTOY(j, board.yorig, board.squaresize, ginfo.selfcolor);
 		pthread_mutex_lock(&hctx->xlock);
-		draw_field(fx, fy, board.fieldsize, 1 - (i + j) % 2, 0);
+		draw_square(fx, fy, board.squaresize, 1 - (i + j) % 2, 0);
 		pthread_mutex_unlock(&hctx->xlock);
 
 		pthread_mutex_lock(&hctx->gamelock);
@@ -802,7 +802,7 @@ static void show(fid updates[][2])
 			pthread_mutex_unlock(&hctx->gamelock);
 
 			pthread_mutex_lock(&hctx->xlock);
-			draw_piece(fx, fy, board.fieldsize, FIGURE(piece), PALETTE(color));
+			draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
 			pthread_mutex_unlock(&hctx->xlock);
 		}
 	}
@@ -821,12 +821,12 @@ static void redraw(int width, int height)
 		board.xorig = d;
 		board.yorig = 0;
 		board.size = height;
-		board.fieldsize = ((double)height) / NF;
+		board.squaresize = ((double)height) / NF;
 	} else {
 		board.xorig = 0;
 		board.yorig = -d;
 		board.size = width;
-		board.fieldsize = ((double)width) / NF;
+		board.squaresize = ((double)width) / NF;
 	}
 
 	pthread_mutex_lock(&hctx->xlock);
@@ -836,11 +836,11 @@ static void redraw(int width, int height)
 
 	for (int j = 0; j < NF; ++j) {
 		for (int i = 0; i < NF; ++i) {
-			double fx = ITOX(i, board.xorig, board.fieldsize, ginfo.selfcolor);
-			double fy = JTOY(j, board.yorig, board.fieldsize, ginfo.selfcolor);
-			int sel = i == selfield[0] && j == selfield[1];
+			double fx = ITOX(i, board.xorig, board.squaresize, ginfo.selfcolor);
+			double fy = JTOY(j, board.yorig, board.squaresize, ginfo.selfcolor);
+			int sel = i == selsquare[0] && j == selsquare[1];
 			pthread_mutex_lock(&hctx->xlock);
-			draw_field(fx, fy, board.fieldsize, 1 - (i + j) % 2, sel);
+			draw_square(fx, fy, board.squaresize, 1 - (i + j) % 2, sel);
 			pthread_mutex_unlock(&hctx->xlock);
 
 			pthread_mutex_lock(&hctx->gamelock);
@@ -852,7 +852,7 @@ static void redraw(int width, int height)
 				pthread_mutex_unlock(&hctx->gamelock);
 
 				pthread_mutex_lock(&hctx->xlock);
-				draw_piece(fx, fy, board.fieldsize, FIGURE(piece), PALETTE(color));
+				draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
 				pthread_mutex_unlock(&hctx->xlock);
 			}
 		}
@@ -917,31 +917,31 @@ static void handle_touch(struct event_touch *e)
 	if (!isplaying)
 		return;
 
-	fid f[2] = {
-		XTOI(e->x, board.xorig, board.fieldsize, ginfo.selfcolor),
-		YTOJ(e->y, board.yorig, board.fieldsize, ginfo.selfcolor)
+	sqid f[2] = {
+		XTOI(e->x, board.xorig, board.squaresize, ginfo.selfcolor),
+		YTOJ(e->y, board.yorig, board.squaresize, ginfo.selfcolor)
 	};
 	if (f[0] < 0 || f[0] >= NF || f[1] < 0 || f[1] >= NF)
 		return;
 
-	if (e->flags & TOUCH_RELEASE && (selfield[0] == -1 || memcmp(f, selfield, sizeof(f)) == 0))
+	if (e->flags & TOUCH_RELEASE && (selsquare[0] == -1 || memcmp(f, selsquare, sizeof(f)) == 0))
 		return;
 
 	pthread_mutex_lock(&hctx->gamelock);
 	int targetspiece = game_is_movable_piece_at(f[0], f[1]);
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (targetspiece) {
-		if (memcmp(f, selfield, 2 * sizeof(fid)) == 0) { /* unselect piece */
+		if (memcmp(f, selsquare, 2 * sizeof(sqid)) == 0) { /* unselect piece */
 			unselectf();
-		} else if (selfield[0] == -1) { /* select piece */
+		} else if (selsquare[0] == -1) { /* select piece */
 			selectf(f);
 		} else { /* switch selection over to piece */
 			unselectf();
 			if (!(e->flags & TOUCH_RELEASE))
 				selectf(f);
 		}
-	} else if (selfield[0] != -1) {
-		fid updates[NUM_UPDATES_MAX][2];
+	} else if (selsquare[0] != -1) {
+		sqid updates[NUM_UPDATES_MAX][2];
 		int err = apply_move(f, updates);
 		unselectf();
 		if (err == 1)
@@ -972,7 +972,7 @@ static void handle_playmove(struct event_playmove *e)
 	}
 
 	pthread_mutex_lock(&hctx->gamelock);
-	fid updates[NUM_UPDATES_MAX][2];
+	sqid updates[NUM_UPDATES_MAX][2];
 	game_get_updates(updates);
 	pthread_mutex_unlock(&hctx->gamelock);
 	show(updates);
@@ -1072,7 +1072,7 @@ static void handle_updatetime(void)
 	if (tiplayer->total < 0) {
 		tiplayer->total = 0;
 		
-		if (selfield[0] != -1)
+		if (selsquare[0] != -1)
 			unselectf();
 
 		/* update status */
@@ -1122,8 +1122,8 @@ static void gfxh_setup(void)
 	pfds[1].fd = fopp;
 	pfds[1].events = POLLIN;
 
-	selfield[0] = -1;
-	selfield[1] = -1;
+	selsquare[0] = -1;
+	selsquare[1] = -1;
 
 	pthread_mutex_lock(&hctx->xlock);
 	XWindowAttributes wa;
@@ -1136,7 +1136,7 @@ static void gfxh_setup(void)
 	board.xorig = 0;
 	board.yorig = 0;
 	board.size = wa.width;
-	board.fieldsize = wa.height / NF;
+	board.squaresize = wa.height / NF;
 
 	pthread_mutex_lock(&hctx->gamelock);
 	int err = game_init();

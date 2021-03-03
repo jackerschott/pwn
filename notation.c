@@ -28,9 +28,9 @@
 
 #define DIVROUND(a, b) (((a) + ((b) - 1)) / (b))
 
-size_t format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, char *str)
+size_t format_move(piece_t piece, sqid from[2], sqid to[2], piece_t prompiece, char *str)
 {
-	assert(memcmp(from, to, 2 * sizeof(fid)) != 0);
+	assert(memcmp(from, to, 2 * sizeof(sqid)) != 0);
 	assert(prompiece == PIECE_NONE || piece == PIECE_PAWN
 			&& PIECE_IDX(prompiece) >= PIECE_IDX(PIECE_QUEEN)
 			&& PIECE_IDX(prompiece) <= PIECE_IDX(PIECE_KNIGHT));
@@ -127,7 +127,7 @@ char *parse_number(const char *s, long *n)
 	return e;
 }
 char *parse_move(const char *s, piece_t *piece,
-		fid from[2], fid to[2], piece_t *prompiece)
+		sqid from[2], sqid to[2], piece_t *prompiece)
 {
 	/* get piece */
 	const char *c = s;
