@@ -723,7 +723,7 @@ static void selectf(fid f[2])
 	double fx = ITOX(f[0], board.xorig, board.fieldsize, ginfo.selfcolor);
 	double fy = JTOY(f[1], board.yorig, board.fieldsize, ginfo.selfcolor);
 	pthread_mutex_lock(&hctx->xlock);
-	draw_field(fx, fy, board.fieldsize, (f[0] + f[1]) % 2, 1);
+	draw_field(fx, fy, board.fieldsize, 1 - (f[0] + f[1]) % 2, 1);
 	pthread_mutex_unlock(&hctx->xlock);
 
 	pthread_mutex_lock(&hctx->gamelock);
@@ -754,7 +754,7 @@ static void unselectf(void)
 	double fx = ITOX(selfield[0], board.xorig, board.fieldsize, ginfo.selfcolor);
 	double fy = JTOY(selfield[1], board.yorig, board.fieldsize, ginfo.selfcolor);
 	pthread_mutex_lock(&hctx->xlock);
-	draw_field(fx, fy, board.fieldsize, (selfield[0] + selfield[1]) % 2, 0);
+	draw_field(fx, fy, board.fieldsize, 1 - (selfield[0] + selfield[1]) % 2, 0);
 	pthread_mutex_unlock(&hctx->xlock);
 
 	pthread_mutex_lock(&hctx->gamelock);
