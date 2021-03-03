@@ -921,6 +921,9 @@ static void handle_touch(struct event_touch *e)
 		XTOI(e->x, board.xorig, board.fieldsize, ginfo.selfcolor),
 		YTOJ(e->y, board.yorig, board.fieldsize, ginfo.selfcolor)
 	};
+	if (f[0] < 0 || f[0] >= NF || f[1] < 0 || f[1] >= NF)
+		return;
+
 	if (e->flags & TOUCH_RELEASE && (selfield[0] == -1 || memcmp(f, selfield, sizeof(f)) == 0))
 		return;
 
