@@ -114,7 +114,7 @@ size_t format_timestamp(long t, char *s, int coarse)
 	return len;
 }
 
-static char *parse_number(const char *s, long *n)
+char *parse_number(const char *s, long *n)
 {
 	if (isspace(*s))
 		return NULL;
@@ -181,7 +181,7 @@ char *parse_move(const char *s, piece_t *piece,
 
 	return (char *)c;
 }
-char *parse_timeinterval(const char *s, long *t)
+char *parse_timeinterval(const char *s, long *t, int onlycoarse)
 {
 	const char *c = s;
 
@@ -198,7 +198,7 @@ char *parse_timeinterval(const char *s, long *t)
 		return (char *)c;
 	*t += bdt.tm_sec * SECOND;
 
-	if (*c != '.') {
+	if (onlycoarse || *c != '.') {
 		return (char *)c;
 	}
 	++c;

@@ -4,6 +4,8 @@
 #include "pwn.h"
 
 #define SECOND (1000L * 1000L * 1000L)
+#define MINUTE (60L * SECOND)
+#define HOUR (60L * MINUTE)
 
 #define MOVE_MAXLEN (STRLEN("Sg1-f3"))
 #define TINTERVAL_MAXLEN (STRLEN("10:00:00.000000000"))
@@ -15,9 +17,10 @@ size_t format_move(piece_t piece, fid from[2], fid to[2], piece_t prompiece, cha
 size_t format_timeinterval(long t, char *str, int coarse);
 size_t format_timestamp(long t, char *s, int coarse);
 
+char *parse_number(const char *s, long *n);
 char *parse_move(const char *s, piece_t *piece,
 		fid from[2], fid to[2], piece_t *prompiece);
-char *parse_timeinterval(const char *s, long *t);
+char *parse_timeinterval(const char *s, long *t, int onlycoarse);
 char *parse_timestamp(const char *s, long *t);
 
 #endif /* NOTATION_H */

@@ -37,6 +37,9 @@
 #include "notation.h"
 #include "pwn.h"
 
+#define GAMETIME_MAX (10L * HOUR)
+#define MOVEINC_MAX MINUTE
+
 /* options */
 enum {
 	OPTION_IS_SERVER = 1,
@@ -242,26 +245,29 @@ static void print_options(void)
 	}
 }
 
-static int parse_gametime(const char *str, long *h, long *m, long *i)
+static int parse_gametime(const char *str, long *t, long *i)
 {
-	char *e;
-	*h = strtol(str, &e, 10);
-	if (*e != ':')
+	const char *c = str;
+	if (!(c = parse_timeinterval(c, t, 1)))
 		return 1;
-
-	*m = strtol(e + 1, &e, 10);
-	if (*e == '\0') {
+	if (*c == '\0') {
 		*i = 0;
 		return 0;
 	}
 
-	if (*e != '+')
+	if (*c != '+')
 		return 1;
 
-	*i = strtol(e + 1, &e, 10);
-	if (*e != '\0')
+	long n;
+	if (!(c = parse_number(c, &n)))
+		return 1;
+	if (n < 0)
 		return 1;
 
+	if (*c != '\0')
+		return 1;
+
+	*i = n * SECOND;
 	return 0;
 }
 static void parse_options(int argc, char *argv[])
@@ -325,20 +331,16 @@ static void parse_options(int argc, char *argv[])
 			}
 			break;
 		case 't': {
-			long h, m, i;
-			int err = parse_gametime(optarg, &h, &m, &i);
+			long t, i;
+			int err = parse_gametime(optarg, &t, &i);
 			if (err)
 				goto err_invalid_arg;
-			if (h < 0 || h > 10)
+			if (t > GAMETIME_MAX)
 				goto err_invalid_arg;
-			if (m < 0 || m > 60)
-				goto err_invalid_arg;
-			if (i < 0 || i > 60)
-				goto err_invalid_arg;
-			if (h == 10 && m != 0)
+			if (i > MINUTE)
 				goto err_invalid_arg;
 
-			gametime = (h * 60L + m) * 60L * 1000L * 1000L * 1000L;
+			gametime = t;
 			moveinc = i;
 			break;
 		}

@@ -57,6 +57,8 @@
 #define INITMSG_PREFIX "init"
 #define MOVEMSG_PREFIX "move"
 #define STATMSG_PREFIX "status"
+#define DRAWMSG "drawoffer"
+#define TAKEBACKMSG "takeback"
 
 #define INITCOLOR_MAXLEN (MAX(STRLEN("white"), STRLEN("black")))
 #define INITMSG_MAXLEN (STRLEN("init ") 		\
@@ -341,7 +343,7 @@ static int parse_initmsg(const char *str, struct event_init *e)
 		return 1;
 	++c;
 
-	if (!(c = parse_timeinterval(c, &e->gametime)))
+	if (!(c = parse_timeinterval(c, &e->gametime, 0)))
 		return 1;
 	if (*c != ' ')
 		return 1;
@@ -370,7 +372,7 @@ static int parse_movemsg(const char *str, struct event_playmove *e)
 	}
 
 	const char *end;
-	if (!(c = parse_timeinterval(c, &e->tmove)))
+	if (!(c = parse_timeinterval(c, &e->tmove, 0)))
 		return 1;
 	if (*c == '\0')
 		return 0;
@@ -1071,7 +1073,12 @@ static void handle_updatetime(void)
 			unselectf();
 
 		/* update status */
-		status_t status = ginfo.selfcolor ? STATUS_TIMEOUT_BLACK : STATUS_TIMEOUT_WHITE;
+		status_t status;
+		if (isplaying) {
+			status = ginfo.selfcolor ? STATUS_TIMEOUT_BLACK : STATUS_TIMEOUT_WHITE;
+		} else {
+			status = ginfo.selfcolor ? STATUS_TIMEOUT_WHITE : STATUS_TIMEOUT_BLACK;
+		}
 		pthread_mutex_lock(&hctx->gamelock);
 		game_get_status(&status);
 		pthread_mutex_unlock(&hctx->gamelock);
