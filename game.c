@@ -178,7 +178,8 @@ static int is_possible_knight_move(fid ifrom, fid jfrom, fid ito, fid jto, int *
 	if (hints)
 		*hints = 0;
 
-	if ((abs(ito - ifrom) + abs(jto - jfrom)) == 3)
+	if ((abs(ito - ifrom) + abs(jto - jfrom)) == 3
+			&& ito != ifrom && jto != jfrom)
 		return 1;
 
 	return 0;
