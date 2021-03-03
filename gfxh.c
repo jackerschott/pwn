@@ -790,7 +790,7 @@ static void show(fid updates[][2])
 		double fx = ITOX(i, board.xorig, board.fieldsize, ginfo.selfcolor);
 		double fy = JTOY(j, board.yorig, board.fieldsize, ginfo.selfcolor);
 		pthread_mutex_lock(&hctx->xlock);
-		draw_field(fx, fy, board.fieldsize, (i + j) % 2, 0);
+		draw_field(fx, fy, board.fieldsize, 1 - (i + j) % 2, 0);
 		pthread_mutex_unlock(&hctx->xlock);
 
 		pthread_mutex_lock(&hctx->gamelock);
@@ -840,7 +840,7 @@ static void redraw(int width, int height)
 			double fy = JTOY(j, board.yorig, board.fieldsize, ginfo.selfcolor);
 			int sel = i == selfield[0] && j == selfield[1];
 			pthread_mutex_lock(&hctx->xlock);
-			draw_field(fx, fy, board.fieldsize, (i + j) % 2, sel);
+			draw_field(fx, fy, board.fieldsize, 1 - (i + j) % 2, sel);
 			pthread_mutex_unlock(&hctx->xlock);
 
 			pthread_mutex_lock(&hctx->gamelock);
