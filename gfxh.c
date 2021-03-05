@@ -34,9 +34,17 @@
 #include <pthread.h>
 #include <X11/Xlib.h>
 
+#include <pulse/simple.h>
+#include <pulse/error.h>
+
+/* for some reason these are defined in libpulse headers */
+#undef MAX
+#undef MIN
+
 #include "config.h"
 #include "draw.h"
 #include "game.h"
+#include "movesound.h"
 #include "notation.h"
 
 #include "gfxh.h"
@@ -114,6 +122,13 @@ static Display *dpy;
 static Window winmain;
 static Visual *vis;
 static Atom atoms[ATOM_COUNT];
+
+static pa_simple *pacon;
+static const pa_sample_spec pa_soundspec = {
+	.format = PA_SAMPLE_S16LE,
+	.rate = 44100,
+	.channels = 2
+};
 
 static struct handler_context_t *hctx;
 static int fevent;
@@ -490,6 +505,7 @@ static int recv_status(struct event_statuschange *e)
 
 	return 0;
 }
+
 static void show_status(struct gameinfo_t ginfo)
 {
 	char title[TITLE_MAXLEN + 1];
@@ -704,6 +720,15 @@ static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 		pthread_exit(NULL);
 	}
 
+	/* play sound */
+	if (pa_simple_write(pacon, movesound_raw, movesound_raw_len, &err) < 0) {
+		fprintf(stderr, "%s: could not write to pulseaudio server, %s\n",
+				__func__, pa_strerror(err));
+		gfxh_cleanup();
+		pthread_exit(NULL);
+	}
+
+	/* show status */
 	ginfo.status = status;
 	ginfo.tiself.total = ginfo.tiself.subtotal - deduction;
 	ginfo.tiself.subtotal = ginfo.tiself.total;
@@ -1108,6 +1133,7 @@ static void handle_updatetime(void)
 
 static void gfxh_setup(void)
 {
+	int err;
 	if (fcntl(fevent, F_SETFL, O_NONBLOCK) == -1) {
 		SYSERR();
 		goto cleanup_err;
@@ -1133,13 +1159,26 @@ static void gfxh_setup(void)
 	draw_init_context(board.surface);
 	pthread_mutex_unlock(&hctx->xlock);
 
+	/* init pulseaudio connection */
+	pacon = pa_simple_new(NULL, PROGNAME, PA_STREAM_PLAYBACK, NULL, PROGNAME,
+			&pa_soundspec, NULL, NULL, &err);
+	if (!pacon) {
+		pthread_mutex_lock(&hctx->xlock);
+		draw_destroy_context();
+		cairo_surface_destroy(board.surface);
+		pthread_mutex_unlock(&hctx->xlock);
+		fprintf(stderr, "%s: could not connect to pulseaudio server, %s\n",
+				__func__, pa_strerror(err));
+		goto cleanup_err;
+	}
+
 	board.xorig = 0;
 	board.yorig = 0;
 	board.size = wa.width;
 	board.squaresize = wa.height / NF;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int err = game_init();
+	err = game_init();
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (err == -1) {
 		SYSERR();
@@ -1239,6 +1278,8 @@ static void gfxh_cleanup(void)
 {
 	game_terminate();
 
+	pa_simple_free(pacon);
+
 	pthread_mutex_lock(&hctx->xlock);
 	draw_destroy_context();
 	cairo_surface_destroy(board.surface);
@@ -1290,8 +1331,8 @@ void init_communication_server(const char* node, const char *port, color_t color
 	struct addrinfo *res;
 	int err = getaddrinfo(node, port, &hints, &res);
 	if (err) {
-		fprintf(stderr, "could not resolve address and port information\n");
-		fprintf(stderr, "%s", gai_strerror(err));
+		fprintf(stderr, "%s: could not resolve address and port information, %s\n",
+				__func__, gai_strerror(err));
 		close(fsock);
 		exit(-1);
 	}
@@ -1299,7 +1340,7 @@ void init_communication_server(const char* node, const char *port, color_t color
 	int val = 1;
 	setsockopt(fsock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 	if (bind(fsock, res->ai_addr, res->ai_addrlen) == -1) {
-		fprintf(stderr, "could not bind to specified address\n");
+		fprintf(stderr, "%s: could not bind to specified address\n", __func__);
 		SYSERR();
 		close(fsock);
 		exit(-1);

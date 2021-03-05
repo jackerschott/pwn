@@ -26,6 +26,8 @@
 #include <X11/Xdefs.h>
 #include <cairo/cairo-xlib.h>
 
+#define PROGNAME "pwn"
+
 /* generic macros */
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))

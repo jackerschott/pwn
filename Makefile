@@ -24,7 +24,7 @@ OBJ = $(addprefix obj/,$(SRC:c=o))
 OBJDIR = obj
 
 INCS = 
-LIBS = -lpthread -lcairo -lX11
+LIBS = -lpthread -lcairo -lX11 -lpulse -lpulse-simple
 
 CFLAGS = -g -O0 $(INCS)
 LDFLAGS = $(LIBS)

@@ -509,7 +509,7 @@ static void cleanup(void)
 }
 static void run(void)
 {
-	XEvent ev;
+	XEvent e;
 	int term = 0;
 	while (!term) {
 		pthread_mutex_lock(&hctx->mainlock);
@@ -524,19 +524,25 @@ static void run(void)
 			continue;
 
 		pthread_mutex_lock(&hctx->xlock);
-		XNextEvent(dpy, &ev);
+		XNextEvent(dpy, &e);
 		pthread_mutex_unlock(&hctx->xlock);
 
-		if (ev.type == ClientMessage) {
-			on_client_message(&ev.xclient);
-		} else if (ev.type == ConfigureNotify) {
-			on_configure(&ev.xconfigure);
-		} else if (ev.type == ButtonPress) {
-			on_button_press(&ev.xbutton);
-		} else if (ev.type == ButtonRelease) {
-			on_button_release(&ev.xbutton);
-		} else if (ev.type == KeyPress) {
-			on_keypress(&ev.xkey);
+		switch (e.type) {
+		case ClientMessage:
+			on_client_message(&e.xclient);
+			break;
+		case ConfigureNotify:
+			on_configure(&e.xconfigure);
+			break;
+		case ButtonPress:
+			on_button_press(&e.xbutton);
+			break;
+		case ButtonRelease:
+			on_button_release(&e.xbutton);
+			break;
+		case KeyPress:
+			on_keypress(&e.xkey);
+			break;
 		}
 	}
 }
