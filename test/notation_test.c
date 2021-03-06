@@ -2,7 +2,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../notation.h"
+#include "notation.h"
 #include "test.h"
 
 #define DIVROUND(a, b) (((a) + ((b) - 1L)) / (b))
@@ -25,19 +25,19 @@ void test_timeinterval(long dt) {
 	long dtres;
 	char s[TINTERVAL_MAXLEN + 1];
 	format_timeinterval(dt, s, 1);
-	parse_timeinterval(s, &dtres);
+	parse_timeinterval(s, &dtres, 0);
 	printf("info: s = %s\n", s);
 	TEST_EQUAL_LI(dtres, DIVROUND(dt, SECOND) * SECOND);
 
 	format_timeinterval(dt, s, 0);
-	parse_timeinterval(s, &dtres);
+	parse_timeinterval(s, &dtres, 0);
 	printf("info: s = %s\n", s);
 	TEST_EQUAL_LI(dtres, dt);
 }
 
 void test_move() {
 	for (int i = 0; i < NUM_PIECES * NF * NF * NF * NF * (NUM_PIECES - 2); ++i) {
-		fid from[2], to[2];
+		sqid from[2], to[2];
 		piece_t p = 2 * (i % NUM_PIECES) + 2;
 
 		int j = (i / NUM_PIECES);
@@ -46,7 +46,7 @@ void test_move() {
 		from[1] = (j / NF) % NF;
 		to[0] = k % NF;
 		to[1] = (k / NF) % NF;
-		if (memcmp(from, to, 2 * sizeof(fid)) == 0)
+		if (memcmp(from, to, 2 * sizeof(sqid)) == 0)
 			continue;
 
 		int l = (k / NF / NF);
@@ -59,14 +59,14 @@ void test_move() {
 		size_t len = format_move(p, from, to, prompiece, s);
 
 		piece_t pres, prompieceres;
-		fid fromres[2], tores[2];
+		sqid fromres[2], tores[2];
 		parse_move(s, &pres, fromres, tores, &prompieceres);
 		s[len] = '\0';
 		printf("info: s = %s\n", s); 
 
 		TEST_EQUAL_I(pres, p);
-		TEST_EQUAL_I(memcmp(from, fromres, 2 * sizeof(fid)), 0);
-		TEST_EQUAL_I(memcmp(to, tores, 2 * sizeof(fid)), 0);
+		TEST_EQUAL_I(memcmp(from, fromres, 2 * sizeof(sqid)), 0);
+		TEST_EQUAL_I(memcmp(to, tores, 2 * sizeof(sqid)), 0);
 		TEST_EQUAL_I(prompieceres, prompiece);
 	}
 }

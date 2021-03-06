@@ -23,14 +23,14 @@ MANPREFIX = $(PREFIX)/share/man
 APP_NAME = pwn
 SRC_NAMES = audioh.c draw.c game.c gfxh.c main.c notation.c util.c
 HDR_NAMES = audioh.h config.h draw.h game.h gfxh.h minimp3/minimp3.h minimp3/minimp3_ex.h notation.h pwn.h sounds.h util.h
-TEST_NAMES = notationtest
+TEST_NAMES = notation_test
 TEST_SRC_NAMES = notation_test.c
 TEST_HDR_NAMES = test.h
 BUILD_DIR = build
 
 CFLAGS = -g -O0 -DDATADIR='"/home/jona/it/dev/git/pwn/"'
 LDFLAGS = 
-INCS = 
+INCS = -Isrc
 LIBS = -lpthread -lcairo -lX11 -lpulse -lpulse-simple
 
 BIN = $(BUILD_DIR)/$(APP_NAME)
@@ -52,17 +52,17 @@ $(OBJ): $(OBJ_DIR)/%.o: src/%.c
 	$(CC) -c $(CFLAGS) -o $@ $< $(INCS)
 
 # tests
-tests: $(BUILD_DIR) $(TEST_OBJ_DIR) $(TEST_NAMES) 
+tests: $(BUILD_DIR) $(BUILD_DIR)/test $(TEST_OBJ_DIR) $(TEST_NAMES)
 
 $(TEST_NAMES): %: $(BUILD_DIR)/test/%
 
 $(TEST_BIN): $(BUILD_DIR)/test/%: $(TEST_OBJ_DIR)/%.o
-	$(CC) $(LDFLAGS) -o $@ $< $(LIBS)
+	$(CC) $(LDFLAGS) -o $@ $< $(OBJ) $(LIBS)
 
 $(TEST_OBJ): $(TEST_OBJ_DIR)/%.o: test/%.c
 	$(CC) -c $(CFLAGS) -o $@ $< $(INCS)
 
-$(BUILD_DIR) $(OBJ_DIR) $(TEST_OBJ_DIR):
+$(BUILD_DIR) $(OBJ_DIR) $(BUILD_DIR)/test $(TEST_OBJ_DIR):
 	mkdir $@
 
 clean:
