@@ -20,68 +20,34 @@ VERSION = 1.0
 PREFIX = /usr/local
 MANPREFIX = $(PREFIX)/share/man
 
-APP_NAME = pwn
-SRC_NAMES = audioh.c draw.c game.c gfxh.c main.c notation.c util.c
-HDR_NAMES = audioh.h config.h draw.h game.h gfxh.h minimp3/minimp3.h minimp3/minimp3_ex.h notation.h pwn.h sounds.h util.h
-TEST_NAMES = notation_test
-TEST_SRC_NAMES = notation_test.c
-TEST_HDR_NAMES = test.h
-BUILD_DIR = build
+export BINNAME = pwn
+export BUILDDIR = build
+TESTNAMES = notationtest
 
-CFLAGS = -g -O0 -DDATADIR='"/home/jona/it/dev/git/pwn/"'
-LDFLAGS = 
-INCS = -Isrc
-LIBS = -lpthread -lcairo -lX11 -lpulse -lpulse-simple
+$(BINNAME): $(BUILDDIR)
+	$(MAKE) -C src ROOTDIR=..
 
-BIN = $(BUILD_DIR)/$(APP_NAME)
-SRC = $(addprefix src/,$(SRC_NAMES))
-OBJ_DIR = $(BUILD_DIR)/obj
-OBJ = $(addprefix $(OBJ_DIR)/,$(SRC_NAMES:c=o))
+test: $(TESTNAMES)
 
-TEST_BIN = $(addprefix $(BUILD_DIR)/test/,$(TEST_NAMES))
-TEST_OBJ_DIR = $(BUILD_DIR)/testobj
-TEST_OBJ = $(addprefix $(TEST_OBJ_DIR)/,$(TEST_SRC_NAMES:c=o))
+$(TESTNAMES): $(BUILDDIR) $(BINNAME) 
+	$(MAKE) -C test/$@ ROOTDIR=../..
 
-default: $(BIN)
-
-# binary
-$(BIN): $(BUILD_DIR) $(OBJ_DIR) $(OBJ) 
-	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LIBS)
-
-$(OBJ): $(OBJ_DIR)/%.o: src/%.c
-	$(CC) -c $(CFLAGS) -o $@ $< $(INCS)
-
-# tests
-tests: $(BUILD_DIR) $(BUILD_DIR)/test $(TEST_OBJ_DIR) $(TEST_NAMES)
-
-$(TEST_NAMES): %: $(BUILD_DIR)/test/%
-
-$(TEST_BIN): $(BUILD_DIR)/test/%: $(TEST_OBJ_DIR)/%.o
-	$(CC) $(LDFLAGS) -o $@ $< $(OBJ) $(LIBS)
-
-$(TEST_OBJ): $(TEST_OBJ_DIR)/%.o: test/%.c
-	$(CC) -c $(CFLAGS) -o $@ $< $(INCS)
-
-$(BUILD_DIR) $(OBJ_DIR) $(BUILD_DIR)/test $(TEST_OBJ_DIR):
-	mkdir $@
+$(BUILDDIR):
+	mkdir -p $@
 
 clean:
-	$(RM) $(OBJ)
-	$(RM) $(TEST_OBJ)
-	$(RM) $(BIN)
-	-rmdir $(OBJ_DIR)
-	-rmdir $(TEST_OBJ_DIR)
+	rm -rf build/
 
-install: $(BIN)
+install: $(BINNAME)
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp -f $(BIN) $(DESTDIR)$(PREFIX)/bin
-	chmod 755 $(DESTDIR)$(PREFIX)/bin/$(APP_NAME)
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/$(BINNAME)
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
-	sed "s/VERSION/$(VERSION)/g" < pwn.1 > $(DESTDIR)$(MANPREFIX)/man1/pwn.1
-	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/pwn.1
+	sed "s/VERSION/$(VERSION)/g" < $(BINNAME).1 > $(DESTDIR)$(MANPREFIX)/man1/$(BINNAME).1
+	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/$(BINNAME).1
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/$(APP_NAME)
-	rm -f $(DESTDIR)$(MANPREFIX)/man1/pwn.1
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(BINNAME)
+	rm -f $(DESTDIR)$(MANPREFIX)/man1/$(BINNAME).1
 
-.PHONY: default tests $(TEST_NAMES) clean
+.PHONY: $(SUBDIRS) clean install uninstall
