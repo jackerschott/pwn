@@ -27,6 +27,9 @@
 #include <cairo/cairo-xlib.h>
 
 #define PROGNAME "pwn"
+#ifndef DATADIR
+#define DATADIR "/home/jona/it/dev/git/pwn/"
+#endif
 
 /* generic macros */
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -156,5 +159,24 @@ typedef enum piece_t piece_t;
 typedef int sqid;
 typedef int squareinfo_t;
 typedef enum status_t status_t;
+
+/* threading */
+struct handler_t {
+	pthread_t id;
+	int pevent[2];
+	int pconfirm[2];
+	int state;
+};
+struct handler_context_t {
+	struct handler_t gfxh;
+	struct handler_t audioh;
+
+	pthread_mutex_t gamelock;
+	pthread_mutex_t xlock;
+	pthread_mutex_t gfxhlock;
+	pthread_mutex_t mainlock;
+
+	int terminate;
+};
 
 #endif /* CHESS_H */

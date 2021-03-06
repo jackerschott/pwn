@@ -49,7 +49,7 @@
 
 #define DRAWISH_MOVES_MAX 50
 
-struct moveinfo_t {
+struct plyinfo_t {
 	piece_t p;
 	sqid from[2];
 	sqid to[2];
@@ -339,7 +339,7 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 	ply.from[1] = jfrom;
 	ply.to[0] = ito;
 	ply.to[1] = jto;
-	ply.taken = position[ito][jto];
+	ply.taken = position[ito][jto] & PIECEMASK;
 	ply.prompiece = prompiece;
 	memcpy(ply.fep, fep, sizeof(fep));
 	memcpy(ply.castlerights, castlerights, sizeof(ply.castlerights));
@@ -667,6 +667,11 @@ int game_is_movable_piece_at(sqid i, sqid j)
 	return ((position[i][j] & PIECEMASK) != PIECE_NONE)
 		&& (position[i][j] & COLORMASK) == moving_color;
 }
+int game_last_ply_was_capture(void)
+{
+	return plies[pliesnum - 1].taken != PIECE_NONE;
+}
+
 int game_has_sufficient_mating_material(color_t color)
 {
 	int hasking = 0;

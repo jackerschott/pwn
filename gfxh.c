@@ -23,7 +23,6 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -34,18 +33,13 @@
 #include <pthread.h>
 #include <X11/Xlib.h>
 
-#include <pulse/simple.h>
-#include <pulse/error.h>
-
-/* for some reason these are defined in libpulse headers */
-#undef MAX
-#undef MIN
-
+#include "audioh.h"
 #include "config.h"
 #include "draw.h"
 #include "game.h"
-#include "movesound.h"
+#include "sounds.h"
 #include "notation.h"
+#include "util.h"
 
 #include "gfxh.h"
 
@@ -79,7 +73,6 @@
 		+ TSTAMP_MAXLEN)
 #define STATMSG_MAXLEN (STRLEN("status ") 		\
 		+ STATMSG_NAME_MAXLEN)
-/* sorry */
 #define MSG_MAXLEN MAX(MAX(INITMSG_MAXLEN, MOVEMSG_MAXLEN), STATMSG_MAXLEN)
 
 #define TITLE_MAXLEN (TINTERVAL_COARSE_MAXLEN + STRLEN(" - ") 	\
@@ -123,117 +116,13 @@ static Window winmain;
 static Visual *vis;
 static Atom atoms[ATOM_COUNT];
 
-static pa_simple *pacon;
-static const pa_sample_spec pa_soundspec = {
-	.format = PA_SAMPLE_S16LE,
-	.rate = 44100,
-	.channels = 2
-};
-
 static struct handler_context_t *hctx;
 static int fevent;
 static int fconfirm;
 static int *state;
-struct pollfd pfds[2];
+static struct pollfd pfds[2];
 
 static void gfxh_cleanup(void);
-
-int hread(int fd, void *buf, size_t size)
-{
-	char *b = (char *)buf;
-	while (size > 0) {
-		size_t n = read(fd, b, size);
-		if (n == -1) {
-			if (errno == EINTR)
-				continue;
-			assert(errno != EWOULDBLOCK && errno != EAGAIN);
-			return -1;
-		} else if (n == 0) {
-			return 1;
-		}
-
-		b += n;
-		size -= n;
-	}
-	return 0;
-}
-int hwrite(int fd, void *buf, size_t size)
-{
-	char *b = (char *)buf;
-	while (size > 0) {
-		size_t n = write(fd, b, size);
-		if (n == -1) {
-			if (errno == EINTR)
-				continue;
-			assert(errno != EPIPE && errno != EWOULDBLOCK && errno != EAGAIN);
-			return -1;
-		}
-
-		b += n;
-		size -= n;
-	}
-	return 0;
-}
-int hrecv(int fd, char *buf, size_t size)
-{
-	size_t sz = size;
-	char *b = buf;
-	while (sz > 0) {
-		size_t n = recv(fd, b, sz, 0);
-		if (n == -1) {
-			if (errno == EINTR)
-				continue;
-			if (errno == EWOULDBLOCK || errno == EAGAIN)
-				return -2;
-			return -1;
-		} else if (n == 0) {
-			return 1;
-		}
-
-		if (b[n - 1] == '\n') {
-			b[n - 1] = '\0';
-			printf("[received] %s\n", b);
-			return 0;
-		}
-
-		b += n;
-		sz -= n;
-
-		//if (sz == 0) {
-		//	size_t newsz = sz + size;
-		//	void *newbuf = realloc(buf, newsz);
-		//	if (!newbuf)
-		//		return -1;
-		//	buf = newbuf;
-		//	b = buf + sz;
-		//}
-	}
-	return -3;
-}
-int hsend(int fd, char *buf)
-{
-	size_t size = strlen(buf) + 1;
-	buf[size - 1] = '\n';
-
-	char *b = buf;
-	while (size > 0) {
-		size_t n = send(fd, b, size, 0);
-		if (n == -1) {
-			if (errno == EINTR)
-				continue;
-			assert(errno != EPIPE && errno != EWOULDBLOCK && errno != EAGAIN);
-			return -1;
-		}
-
-		b += n;
-		size -= n;
-	}
-
-	char *c = strchr(buf, '\n');
-	*c = '\0';
-	printf("[send] %s\n", buf);
-	return 0;
-}
 
 static void measure_game_start(long *treal, long *tmono)
 {
@@ -277,7 +166,7 @@ static long measure_timestamp()
 	return ts.tv_sec * SECOND + ts.tv_nsec;
 }
 
-static void format_initmsg(struct event_init *e, char *str)
+static void format_initmsg(struct gfxh_event_init *e, char *str)
 {
 	char *c = str;
 	strncpy(c, INITMSG_PREFIX " ", STRLEN(INITMSG_PREFIX " "));
@@ -305,7 +194,7 @@ static void format_initmsg(struct event_init *e, char *str)
 
 	*c = '\0';
 }
-static void format_movemsg(struct event_playmove *e, char *str)
+static void format_movemsg(struct gfxh_event_playmove *e, char *str)
 {
 	size_t l;
 	char *c = str;
@@ -329,7 +218,7 @@ static void format_movemsg(struct event_playmove *e, char *str)
 
 	*c = '\0';
 }
-static void format_statusmsg(struct event_statuschange *e, char *str)
+static void format_statusmsg(struct gfxh_event_statuschange *e, char *str)
 {
 	char *c = str;
 	strncpy(c, STATMSG_PREFIX " ", STRLEN(STATMSG_PREFIX " "));
@@ -337,9 +226,9 @@ static void format_statusmsg(struct event_statuschange *e, char *str)
 
 	strcpy(c, statmsg_names[(int)e->status]);
 }
-static int parse_initmsg(const char *str, struct event_init *e)
+static int parse_initmsg(const char *str, struct gfxh_event_init *e)
 {
-	e->type = EVENT_INIT;
+	e->type = GFXH_EVENT_INIT;
 
 	const char *c = str;
 	assert(strncmp(str, INITMSG_PREFIX " ",  STRLEN(INITMSG_PREFIX " ")) == 0);
@@ -371,9 +260,9 @@ static int parse_initmsg(const char *str, struct event_init *e)
 
 	return 0;
 }
-static int parse_movemsg(const char *str, struct event_playmove *e)
+static int parse_movemsg(const char *str, struct gfxh_event_playmove *e)
 {
-	e->type = EVENT_PLAYMOVE;
+	e->type = GFXH_EVENT_PLAYMOVE;
 
 	const char *c = str;
 	assert(strncmp(c, MOVEMSG_PREFIX " ", STRLEN(MOVEMSG_PREFIX " ")) == 0);
@@ -401,9 +290,9 @@ static int parse_movemsg(const char *str, struct event_playmove *e)
 
 	return 0;
 }
-static int parse_statusmsg(const char *str, struct event_statuschange *e)
+static int parse_statusmsg(const char *str, struct gfxh_event_statuschange *e)
 {
-	e->type = EVENT_STATUSCHANGE;
+	e->type = GFXH_EVENT_STATUSCHANGE;
 
 	const char *c = str;
 	assert(strncmp(c, STATMSG_PREFIX " ", STRLEN(STATMSG_PREFIX " ")) == 0);
@@ -425,23 +314,23 @@ static int parse_statusmsg(const char *str, struct event_statuschange *e)
 
 	return 0;
 }
-static void format_msg(union event_t *e, char *str)
+static void format_msg(union gfxh_event_t *e, char *str)
 {
 	switch (e->type) {
-	case EVENT_INIT:
+	case GFXH_EVENT_INIT:
 		format_initmsg(&e->init, str);
 		break;
-	case EVENT_PLAYMOVE:
+	case GFXH_EVENT_PLAYMOVE:
 		format_movemsg(&e->playmove, str);
 		break;
-	case EVENT_STATUSCHANGE:
+	case GFXH_EVENT_STATUSCHANGE:
 		format_statusmsg(&e->statuschange, str);
 		break;
 	default:
 		assert(0);
 	}
 }
-static int parse_msg(const char *str, union event_t *e)
+static int parse_msg(const char *str, union gfxh_event_t *e)
 {
 	if (strncmp(str, INITMSG_PREFIX, STRLEN(INITMSG_PREFIX)) == 0) {
 		return parse_initmsg(str, &e->init);
@@ -452,7 +341,7 @@ static int parse_msg(const char *str, union event_t *e)
 	}
 	assert(0);
 }
-static int send_msg(union event_t *e)
+static int send_msg(union gfxh_event_t *e)
 {
 	char buf[MSG_MAXLEN + 1];
 	format_msg(e, buf);
@@ -463,7 +352,7 @@ static int send_msg(union event_t *e)
 
 	return 0;
 }
-static int recv_msg(union event_t *e)
+static int recv_msg(union gfxh_event_t *e)
 {
 	char buf[MSG_MAXLEN + 1];
 	int err = hrecv(fopp, buf, sizeof(buf));
@@ -478,9 +367,9 @@ static int recv_msg(union event_t *e)
 
 static int send_status(status_t status)
 {
-	union event_t e;
+	union gfxh_event_t e;
 	memset(&e, 0, sizeof(e));
-	e.statuschange.type = EVENT_STATUSCHANGE;
+	e.statuschange.type = GFXH_EVENT_STATUSCHANGE;
 	e.statuschange.status = status;
 
 	char buf[STATMSG_MAXLEN + 1];
@@ -492,7 +381,7 @@ static int send_status(status_t status)
 
 	return 0;
 }
-static int recv_status(struct event_statuschange *e)
+static int recv_status(struct gfxh_event_statuschange *e)
 {
 	const size_t bufsize = STATMSG_MAXLEN + 1;
 	char buf[bufsize];
@@ -673,16 +562,16 @@ static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 	long tmove = measure_move_time(ginfo.tiself.movestart);
 	long tstamp = measure_timestamp();
 
-	union event_t e;
-	memset(&e, 0, sizeof(e));
-	e.playmove.type = EVENT_PLAYMOVE;
-	e.playmove.piece = piece;
-	memcpy(e.playmove.from, selsquare, sizeof(e.playmove.from));
-	memcpy(e.playmove.to, f, sizeof(e.playmove.to));
-	e.playmove.prompiece = prompiece;
-	e.playmove.tmove = tmove;
-	e.playmove.tstamp = tstamp;
-	err = send_msg(&e);
+	union gfxh_event_t emove;
+	memset(&emove, 0, sizeof(emove));
+	emove.playmove.type = GFXH_EVENT_PLAYMOVE;
+	emove.playmove.piece = piece;
+	memcpy(emove.playmove.from, selsquare, sizeof(emove.playmove.from));
+	memcpy(emove.playmove.to, f, sizeof(emove.playmove.to));
+	emove.playmove.prompiece = prompiece;
+	emove.playmove.tmove = tmove;
+	emove.playmove.tstamp = tstamp;
+	err = send_msg(&emove);
 	if (err == -1) {
 		SYSERR();
 		gfxh_cleanup();
@@ -710,10 +599,11 @@ static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 	pthread_mutex_unlock(&hctx->gamelock);
 
 	/* communicate status */
-	memset(&e, 0, sizeof(e));
-	e.statuschange.type = EVENT_STATUSCHANGE;
-	e.statuschange.status = status;
-	err = send_msg(&e);
+	union gfxh_event_t estat;
+	memset(&estat, 0, sizeof(estat));
+	estat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+	estat.statuschange.status = status;
+	err = send_msg(&estat);
 	if (err == -1) {
 		SYSERR();
 		gfxh_cleanup();
@@ -721,9 +611,23 @@ static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 	}
 
 	/* play sound */
-	if (pa_simple_write(pacon, movesound_raw, movesound_raw_len, &err) < 0) {
-		fprintf(stderr, "%s: could not write to pulseaudio server, %s\n",
-				__func__, pa_strerror(err));
+	char *fname;
+	pthread_mutex_lock(&hctx->gamelock);
+	int capture = game_last_ply_was_capture();
+	pthread_mutex_unlock(&hctx->gamelock);
+	if (capture) {
+		fname = SOUND_CAPTURE_FNAME;
+	} else {
+		fname = SOUND_MOVE_FNAME;
+	}
+
+	union audioh_event_t esound;
+	memset(&esound, 0, sizeof(esound));
+	esound.playsound.type = AUDIOH_EVENT_PLAYSOUND;
+	esound.playsound.fname = fname;
+	int n = hwrite(hctx->audioh.pevent[1], &esound, sizeof(esound));
+	if (n == -1) {
+		SYSERR();
 		gfxh_cleanup();
 		pthread_exit(NULL);
 	}
@@ -888,14 +792,14 @@ static void redraw(int width, int height)
 	pthread_mutex_unlock(&hctx->xlock);
 }
 
-static void handle_clientmessage(struct event_clientmessage *e)
+static void handle_clientmessage(struct gfxh_event_clientmessage *e)
 {
 	if (e->data.l[0] == atoms[ATOM_DELETE_WINDOW]) {
 		gfxh_cleanup();
 		pthread_exit(NULL);
 	}
 }
-static void handle_redraw(struct event_redraw *e)
+static void handle_redraw(struct gfxh_event_redraw *e)
 {
 	pthread_mutex_lock(&hctx->gfxhlock);
 	*state |= GFXH_IS_DRAWING;
@@ -931,7 +835,7 @@ static void handle_redraw(struct event_redraw *e)
 		redraw(wa.width, wa.height);
 	}
 }
-static void handle_touch(struct event_touch *e)
+static void handle_touch(struct gfxh_event_touch *e)
 {
 	if (ginfo.status != STATUS_MOVING_WHITE && ginfo.status != STATUS_MOVING_BLACK)
 		return;
@@ -974,7 +878,7 @@ static void handle_touch(struct event_touch *e)
 		show(updates);
 	}
 }
-static void handle_playmove(struct event_playmove *e)
+static void handle_playmove(struct gfxh_event_playmove *e)
 {
 	if (ginfo.status != STATUS_MOVING_WHITE && ginfo.status != STATUS_MOVING_BLACK) {
 		fprintf(stderr, "%s: received move in state %s", __func__, statmsg_names[(int)ginfo.status]);
@@ -1025,7 +929,7 @@ static void handle_playmove(struct event_playmove *e)
 
 	nupdates = 0;
 }
-static void handle_statuschange(struct event_statuschange *e)
+static void handle_statuschange(struct gfxh_event_statuschange *e)
 {
 	switch (e->status) {
 	case STATUS_MOVING_WHITE:
@@ -1112,9 +1016,9 @@ static void handle_updatetime(void)
 		pthread_mutex_unlock(&hctx->gamelock);
 
 		/* communicate status */
-		union event_t e;
+		union gfxh_event_t e;
 		memset(&e, 0, sizeof(e));
-		e.statuschange.type = EVENT_STATUSCHANGE;
+		e.statuschange.type = GFXH_EVENT_STATUSCHANGE;
 		e.statuschange.status = status;
 		int err = send_msg(&e);
 		if (err == -1) {
@@ -1159,19 +1063,6 @@ static void gfxh_setup(void)
 	draw_init_context(board.surface);
 	pthread_mutex_unlock(&hctx->xlock);
 
-	/* init pulseaudio connection */
-	pacon = pa_simple_new(NULL, PROGNAME, PA_STREAM_PLAYBACK, NULL, PROGNAME,
-			&pa_soundspec, NULL, NULL, &err);
-	if (!pacon) {
-		pthread_mutex_lock(&hctx->xlock);
-		draw_destroy_context();
-		cairo_surface_destroy(board.surface);
-		pthread_mutex_unlock(&hctx->xlock);
-		fprintf(stderr, "%s: could not connect to pulseaudio server, %s\n",
-				__func__, pa_strerror(err));
-		goto cleanup_err;
-	}
-
 	board.xorig = 0;
 	board.yorig = 0;
 	board.size = wa.width;
@@ -1184,7 +1075,6 @@ static void gfxh_setup(void)
 		SYSERR();
 		goto cleanup_err;
 	}
-
 
 	ginfo.tiself.subtotal = ginfo.time;
 	ginfo.tiself.movestart = ginfo.tstart;
@@ -1206,7 +1096,7 @@ cleanup_err:
 }
 static void gfxh_run(void)
 {
-	union event_t e;
+	union gfxh_event_t e;
 	memset(&e, 0, sizeof(e));
 	while (1) {
 		int n = poll(pfds, ARRNUM(pfds), 0);
@@ -1227,13 +1117,13 @@ static void gfxh_run(void)
 			}
 
 			switch (e.type) {
-			case EVENT_CLIENTMESSAGE:
+			case GFXH_EVENT_CLIENTMESSAGE:
 				handle_clientmessage(&e.clientmessage);
 				break;
-			case EVENT_REDRAW:
+			case GFXH_EVENT_REDRAW:
 				handle_redraw(&e.redraw);
 				break;
-			case EVENT_TOUCH:
+			case GFXH_EVENT_TOUCH:
 				handle_touch(&e.touch);
 				break;
 			default:
@@ -1256,10 +1146,10 @@ static void gfxh_run(void)
 			}
 
 			switch (e.type) {
-			case EVENT_PLAYMOVE:
+			case GFXH_EVENT_PLAYMOVE:
 				handle_playmove(&e.playmove);
 				break;
-			case EVENT_STATUSCHANGE:
+			case GFXH_EVENT_STATUSCHANGE:
 				handle_statuschange(&e.statuschange);
 				break;
 			default:
@@ -1277,8 +1167,6 @@ cleanup_err:
 static void gfxh_cleanup(void)
 {
 	game_terminate();
-
-	pa_simple_free(pacon);
 
 	pthread_mutex_lock(&hctx->xlock);
 	draw_destroy_context();
@@ -1364,9 +1252,9 @@ void init_communication_server(const char* node, const char *port, color_t color
 	long tstartreal;
 	measure_game_start(&tstartreal, &ginfo.tstart);
 
-	union event_t e;
+	union gfxh_event_t e;
 	memset(&e, 0, sizeof(e));
-	e.init.type = EVENT_INIT;
+	e.init.type = GFXH_EVENT_INIT;
 	e.init.color = color;
 	e.init.gametime = gametime;
 	e.init.tstamp = tstartreal;
@@ -1408,7 +1296,7 @@ void init_communication_client(const char *node, const char *port)
 		exit(-1);
 	}
 
-	union event_t e;
+	union gfxh_event_t e;
 	err = recv_msg(&e);
 	if (err == -1) {
 		SYSERR();
@@ -1427,7 +1315,7 @@ void init_communication_client(const char *node, const char *port)
 		close(fopp);
 		exit(-1);
 	}
-	if (e.type != EVENT_INIT) {
+	if (e.type != GFXH_EVENT_INIT) {
 		fprintf(stderr, "%s: expected init message", __func__);
 		close(fopp);
 		exit(-1);

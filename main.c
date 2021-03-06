@@ -31,11 +31,13 @@
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 
+#include "audioh.h"
 #include "config.h"
 #include "game.h"
 #include "gfxh.h"
 #include "notation.h"
 #include "pwn.h"
+#include "util.h"
 
 #define GAMETIME_MAX (10L * HOUR)
 #define MOVEINC_MAX MINUTE
@@ -96,13 +98,6 @@ static int start_handler(void *args, int state, void *(*main)(void *), struct ha
 	h->state = state;
 
 	return start_thread(args, main, GFXH_STACKSIZE, &h->id);
-
-err_pthread:
-	close(h->pevent[0]);
-	close(h->pevent[1]);
-	close(h->pconfirm[0]);
-	close(h->pconfirm[1]);
-	return 1;
 }
 static int stop_handler(struct handler_t *h)
 {
@@ -123,17 +118,15 @@ static int stop_handler(struct handler_t *h)
 
 static void on_client_message(XClientMessageEvent *e)
 {
-	union event_t event;
+	union gfxh_event_t event;
 	memset(&event, 0, sizeof(event));
-	event.clientmessage.type = EVENT_CLIENTMESSAGE;
+	event.clientmessage.type = GFXH_EVENT_CLIENTMESSAGE;
 	memcpy(&event.clientmessage.data, &e->data, sizeof(e->data));
 	int n = hwrite(hctx->gfxh.pevent[1], &event, sizeof(event));
 	if (n == -1) {
 		SYSERR();
 		cleanup();
 		exit(-1);
-	} else if (n == 1) {
-		return;
 	}
 }
 static void on_configure(XConfigureEvent *e)
@@ -145,9 +138,9 @@ static void on_configure(XConfigureEvent *e)
 		return;
 	}
 
-	union event_t event;
+	union gfxh_event_t event;
 	memset(&event, 0, sizeof(event));
-	event.redraw.type = EVENT_REDRAW;
+	event.redraw.type = GFXH_EVENT_REDRAW;
 	event.redraw.width = e->width;
 	event.redraw.height = e->height;
 	int n = hwrite(hctx->gfxh.pevent[1], &event, sizeof(event));
@@ -155,8 +148,6 @@ static void on_configure(XConfigureEvent *e)
 		SYSERR();
 		cleanup();
 		exit(-1);
-	} else if (n == 1) {
-		return;
 	}
 
 	int res;
@@ -171,9 +162,9 @@ static void on_configure(XConfigureEvent *e)
 }
 static void on_button_press(XButtonEvent *e)
 {
-	union event_t event;
+	union gfxh_event_t event;
 	memset(&event, 0, sizeof(event));
-	event.touch.type = EVENT_TOUCH;
+	event.touch.type = GFXH_EVENT_TOUCH;
 	event.touch.x = e->x;
 	event.touch.y = e->y;
 	event.touch.flags = TOUCH_PRESS;
@@ -182,15 +173,13 @@ static void on_button_press(XButtonEvent *e)
 		SYSERR();
 		cleanup();
 		exit(-1);
-	} else if (n == 1) {
-		return;
 	}
 }
 static void on_button_release(XButtonEvent *e)
 {
-	union event_t event;
+	union gfxh_event_t event;
 	memset(&event, 0, sizeof(event));
-	event.touch.type = EVENT_TOUCH;
+	event.touch.type = GFXH_EVENT_TOUCH;
 	event.touch.x = e->x;
 	event.touch.y = e->y;
 	event.touch.flags = TOUCH_RELEASE;
@@ -199,8 +188,6 @@ static void on_button_release(XButtonEvent *e)
 		SYSERR();
 		cleanup();
 		exit(-1);
-	} else if (n == 1) {
-		return;
 	}
 }
 static void on_keypress(XKeyEvent *e)
@@ -480,6 +467,25 @@ static void setup(void)
 		free(hctx);
 		goto cleanup_err_threads;
 	}
+
+	struct audioh_args_t *audiohargs = malloc(sizeof(*audiohargs));
+	if (!audiohargs) {
+		SYSERR();
+		if (stop_handler(&hctx->gfxh))
+			fprintf(stderr, "error while terminating graphics handler thread\n");
+		free(hctx);
+		goto cleanup_err_threads;
+	}
+	audiohargs->hctx = hctx;
+	if (start_handler(audiohargs, 0, audioh_main, &hctx->audioh)) {
+		fprintf(stderr, "error while starting audio handler thread");
+		if (stop_handler(&hctx->gfxh))
+			fprintf(stderr, "error while terminating graphics handler thread\n");
+		free(audiohargs);
+		free(hctx);
+		goto cleanup_err_threads;
+	}
+
 	return;
 
 cleanup_err_threads:
@@ -494,6 +500,8 @@ static void cleanup(void)
 {
 	if (stop_handler(&hctx->gfxh))
 		fprintf(stderr, "error while terminating graphics handler thread\n");
+	if (stop_handler(&hctx->audioh))
+		fprintf(stderr, "error while terminating audio handler thread\n");
 
 	pthread_mutex_destroy(&hctx->mainlock);
 	pthread_mutex_destroy(&hctx->gfxhlock);

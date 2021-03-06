@@ -18,15 +18,15 @@
 include config.mk
 
 PROG = pwn
-SRC = main.c gfxh.c game.c draw.c notation.c
-HDR = pwn.h gfxh.h game.h draw.h notation.h config.h
+SRC = main.c gfxh.c audioh.c game.c draw.c notation.c util.c
+HDR = pwn.h gfxh.h audioh.h game.h draw.h notation.h util.h config.h minimp3.h minimp3_ex.h sounds.h
 OBJ = $(addprefix obj/,$(SRC:c=o))
 OBJDIR = obj
 
 INCS = 
 LIBS = -lpthread -lcairo -lX11 -lpulse -lpulse-simple
 
-CFLAGS = -g -O0 $(INCS)
+CFLAGS = -g -O0 -DDATADIR='"/home/jona/it/dev/git/pwn/"' $(INCS)
 LDFLAGS = $(LIBS)
 
 $(PROG): $(OBJDIR) $(OBJ)

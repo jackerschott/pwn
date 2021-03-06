@@ -23,7 +23,7 @@
 
 #define NUM_UPDATES_MAX 4
 
-typedef struct moveinfo_t plyinfo_t;
+typedef struct plyinfo_t plyinfo_t;
 
 int game_init(void);
 void game_init_test_board(void);
@@ -33,6 +33,7 @@ int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece)
 void game_undo_move(plyinfo_t *m);
 
 int game_is_movable_piece_at(sqid i, sqid j);
+int game_last_ply_was_capture(void);
 void game_get_status(status_t *externstatus);
 
 color_t game_get_moving_color(void);

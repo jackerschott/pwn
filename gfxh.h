@@ -24,19 +24,19 @@
 #define GFXH_STACKSIZE (4096 * 64)
 
 enum {
-	EVENT_CLIENTMESSAGE,
-	EVENT_REDRAW,
-	EVENT_TOUCH,
-	EVENT_KEYTOUCH,
-	EVENT_INIT,
-	EVENT_PLAYMOVE,
-	EVENT_STATUSCHANGE,
+	GFXH_EVENT_CLIENTMESSAGE,
+	GFXH_EVENT_REDRAW,
+	GFXH_EVENT_TOUCH,
+	GFXH_EVENT_KEYTOUCH,
+	GFXH_EVENT_INIT,
+	GFXH_EVENT_PLAYMOVE,
+	GFXH_EVENT_STATUSCHANGE,
 };
 enum {
 	TOUCH_PRESS = 0,
 	TOUCH_RELEASE = 1,
 };
-struct event_clientmessage {
+struct gfxh_event_clientmessage {
 	int type;
 	union {
 		char b[20];
@@ -44,23 +44,23 @@ struct event_clientmessage {
 		long l[5];
 	} data;
 };
-struct event_redraw {
+struct gfxh_event_redraw {
 	int type;
 	int width, height;
 };
-struct event_touch {
+struct gfxh_event_touch {
 	int type;
 	int x;
 	int y;
 	int flags;
 };
-struct event_init {
+struct gfxh_event_init {
 	int type;
 	color_t color;
 	long gametime;
 	long tstamp;
 };
-struct event_playmove {
+struct gfxh_event_playmove {
 	int type;
 	piece_t piece;
 	sqid from[2];
@@ -69,35 +69,18 @@ struct event_playmove {
 	long tmove;
 	long tstamp;
 };
-struct event_statuschange {
+struct gfxh_event_statuschange {
 	int type;
 	status_t status;
 };
-union event_t {
+union gfxh_event_t {
 	int type;
-	struct event_clientmessage clientmessage;
-	struct event_redraw redraw;
-	struct event_touch touch;
-	struct event_init init;
-	struct event_playmove playmove;
-	struct event_statuschange statuschange;
-};
-
-struct handler_t {
-	pthread_t id;
-	int pevent[2];
-	int pconfirm[2];
-	int state;
-};
-struct handler_context_t {
-	struct handler_t gfxh;
-
-	pthread_mutex_t gamelock;
-	pthread_mutex_t xlock;
-	pthread_mutex_t gfxhlock;
-	pthread_mutex_t mainlock;
-
-	int terminate;
+	struct gfxh_event_clientmessage clientmessage;
+	struct gfxh_event_redraw redraw;
+	struct gfxh_event_touch touch;
+	struct gfxh_event_init init;
+	struct gfxh_event_playmove playmove;
+	struct gfxh_event_statuschange statuschange;
 };
 
 enum {
@@ -118,9 +101,6 @@ struct gfxh_args_t {
 	Visual *vis;
 	Atom atoms[ATOM_COUNT];
 };
-
-int hread(int fd, void *buf, size_t size);
-int hwrite(int fd, void *buf, size_t size);
 
 void init_communication_server(const char* node, const char *port, color_t color, long gametime);
 void init_communication_client(const char *node, const char *port);
