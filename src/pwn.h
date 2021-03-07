@@ -88,6 +88,8 @@ enum piece_t {
 	PIECE_KNIGHT = 10,
 	PIECE_PAWN = 12,
 };
+#define CASTLERIGHT_QUEENSIDE 	(1 << 0)
+#define CASTLERIGHT_KINGSIDE 	(1 << 1)
 
 enum status_t {
 	STATUS_MOVING_WHITE,
@@ -146,13 +148,7 @@ static const char *piece_names[] = {
 	"knight",
 	"pawn",
 };
-static const char piece_symbols[] = {
-	'K',
-	'Q',
-	'R',
-	'B',
-	'N',
-};
+static const char *piece_symbols = "kqrbnp";
 
 typedef enum color_t color_t;
 typedef enum piece_t piece_t;

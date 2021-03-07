@@ -37,7 +37,6 @@
 #include "config.h"
 #include "draw.h"
 #include "game.h"
-#include "sounds.h"
 #include "notation.h"
 #include "util.h"
 
@@ -545,6 +544,13 @@ static int move(sqid from[2], sqid to[2], piece_t *piece, piece_t *prompiece)
 			return -1;
 	}
 
+	/* testing */
+	char fentest[FEN_BUFSIZE];
+	pthread_mutex_lock(&hctx->gamelock);
+	game_get_fen(fentest);
+	pthread_mutex_unlock(&hctx->gamelock);
+	printf("%s\n", fentest);
+
 	return 0;
 }
 static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
@@ -841,7 +847,7 @@ static void handle_touch(struct gfxh_event_touch *e)
 		return;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int isplaying = game_get_moving_color() == ginfo.selfcolor;
+	int isplaying = game_get_active_color() == ginfo.selfcolor;
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (!isplaying)
 		return;
@@ -948,7 +954,7 @@ static void handle_statuschange(struct gfxh_event_statuschange *e)
 	case STATUS_TIMEOUT_BLACK:
 	case STATUS_DRAW_MATERIAL_VS_TIMEOUT:
 		pthread_mutex_lock(&hctx->gamelock);
-		int isplaying = game_get_moving_color() == ginfo.selfcolor;
+		int isplaying = game_get_active_color() == ginfo.selfcolor;
 		pthread_mutex_unlock(&hctx->gamelock);
 		if (isplaying)
 			goto err_false_claim;
@@ -992,7 +998,7 @@ static void handle_updatetime(void)
 		return;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	int isplaying = game_get_moving_color() == ginfo.selfcolor;
+	int isplaying = game_get_active_color() == ginfo.selfcolor;
 	pthread_mutex_unlock(&hctx->gamelock);
 	struct timeinfo_t *tiplayer = isplaying ? &ginfo.tiself : &ginfo.tiopp;
 
@@ -1075,6 +1081,13 @@ static void gfxh_setup(void)
 		SYSERR();
 		goto cleanup_err;
 	}
+
+	/* testing */
+	char fentest[FEN_BUFSIZE];
+	pthread_mutex_lock(&hctx->gamelock);
+	game_get_fen(fentest);
+	pthread_mutex_unlock(&hctx->gamelock);
+	printf("%s\n", fentest);
 
 	ginfo.tiself.subtotal = ginfo.time;
 	ginfo.tiself.movestart = ginfo.tstart;

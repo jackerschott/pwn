@@ -132,7 +132,7 @@ char *parse_move(const char *s, piece_t *piece,
 	/* get piece */
 	const char *c = s;
 	piece_t p = PIECE_NONE;
-	for (int i = 0; i < ARRNUM(piece_symbols); ++i) {
+	for (int i = 0; i < STRLEN(piece_symbols); ++i) {
 		if (*c == piece_symbols[i]) {
 			p = PIECE_BY_IDX(i);
 			++c;
@@ -230,6 +230,221 @@ char *parse_timestamp(const char *s, long *t)
 		return (char *)c;
 	}
 	*t += ns;
+
+	return (char *)c;
+}
+
+size_t format_fen(squareinfo_t position[NF][NF], color_t active_color,
+		int castlerights[2], sqid fep[2], unsigned int ndrawplies, unsigned int nmove, char *s)
+{
+	char *c = s;
+
+	/* position */
+	int n = 0;
+	for (sqid j = NF - 1; j >= 0; --j) {
+		for (sqid i = 0; i < NF; ++i) {
+			piece_t piece = position[i][j] & PIECEMASK;
+			color_t color = position[i][j] & COLORMASK;
+			if (piece == PIECE_NONE) {
+				++n;
+				continue;
+			}
+
+			if (n > 0) {
+				assert(n <= NF);
+				*c = '0' + n;
+				++c;
+
+				n = 0;
+			}
+
+			int p = PIECE_IDX(piece);
+			*c = color ? piece_symbols[p] : toupper(piece_symbols[p]);
+			++c;
+		}
+		if (n > 0) {
+			assert(n <= NF);
+			*c = '0' + n;
+			++c;
+
+			n = 0;
+		}
+
+		*c = j > 0 ? '/' : ' ';
+		++c;
+	}
+
+	/* active color */
+	c[0] = active_color ? 'b' : 'w';
+	c[1] = ' ';
+	c += 2;
+
+	/* castlerights */
+	if (castlerights[COLOR_WHITE] == 0 && castlerights[COLOR_BLACK] == 0) {
+		*c = '-';
+	} else {
+		if (castlerights[COLOR_WHITE] & CASTLERIGHT_KINGSIDE) {
+			*c = 'K';
+			++c;
+		}
+		if (castlerights[COLOR_WHITE] & CASTLERIGHT_QUEENSIDE) {
+			*c = 'Q';
+			++c;
+		}
+		if (castlerights[COLOR_BLACK] & CASTLERIGHT_KINGSIDE) {
+			*c = 'k';
+			++c;
+		}
+		if (castlerights[COLOR_BLACK] & CASTLERIGHT_QUEENSIDE) {
+			*c = 'q';
+			++c;
+		}
+	}
+	*c = ' ';
+	++c;
+
+	/* en passant target square */
+	if (fep[0] == -1 && fep[1] == -1) {
+		*c = '-';
+		++c;
+	} else {
+		c[0] = ROW_CHAR(fep[0]);
+		c[1] = COL_CHAR(fep[1]);
+		c += 2;
+	}
+	*c = ' ';
+	++c;
+
+	/* number of drawish plies */
+	sprintf(c, "%u %u", ndrawplies, nmove);
+
+	size_t l = strlen(s);
+	assert(l < FEN_BUFSIZE);
+	return l;
+}
+char *parse_fen(const char *s, squareinfo_t position[NF][NF], color_t *active_color,
+		int castlerights[2], sqid fep[2], unsigned int *ndrawplies, unsigned int *nmove)
+{
+	const char *c = s;
+
+	/* position */
+	memset(position, 0, NF * NF * sizeof(position[0][0]));
+
+	int f = 0;
+	while (*c != ' ') {
+		if (*c == '/') {
+			++c;
+			continue;
+		} else if (*c >= '1' && *c <= '8') {
+			f += *c - '0';
+			++c;
+			continue;
+		}
+
+		int p = 0;
+		color_t color;
+		for (; p < STRLEN(piece_symbols); ++p) {
+			if (*c == toupper(piece_symbols[p])) {
+				color = COLOR_WHITE;
+				break;
+			} else if (*c == piece_symbols[p]) {
+				color = COLOR_BLACK;
+				break;
+			}
+		}
+		if (p == STRLEN(piece_symbols))
+			return NULL;
+
+		if (f >= NF * NF)
+			return NULL;
+		position[f % NF][NF - (f / NF) - 1] = PIECE_BY_IDX(p) | color;
+		++f;
+
+		++c;
+	}
+	++c;
+
+	/* active color */
+	if (c[0] == 'w') {
+		*active_color = COLOR_WHITE;
+	} else if (c[0] == 'b') {
+		*active_color = COLOR_BLACK;
+	} else {
+		return NULL;
+	}
+	if (c[1] != ' ')
+		return NULL;
+	c += 2;
+
+	/* castlerights */
+	memset(castlerights, 0, 2 * sizeof(castlerights[0]));
+	if (*c == '-') {
+		++c;
+	} else {
+		int rights = 0;
+		const char *syms = "KQkq";
+
+		int i = 0;
+		for (; c[i] != ' '; ++i) {
+			int j = 0;
+			for (; j < STRLEN(syms); ++j) {
+				if (c[i] != syms[j])
+					continue;
+
+				int right = 1 << j;
+				if (right <= rights)
+					return NULL;
+
+				rights |= right;
+				break;
+			}
+			if (j == STRLEN(syms))
+				return NULL;
+		}
+
+		castlerights[COLOR_WHITE] = rights & (CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE);
+		castlerights[COLOR_BLACK] = (rights >> 2) & (CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE);
+
+		c += i;
+	}
+	if (*c != ' ')
+		return NULL;
+	++c;
+
+	/* en passant target square */
+	if (*c == '-') {
+		fep[0] = -1;
+		fep[1] = -1;
+		++c;
+	} else {
+		int i = ROW_BY_CHAR(c[0]);
+		int j = COL_BY_CHAR(c[1]);
+		if (i < 0 || i >= NF || j < 0 || j >= NF)
+			return NULL;
+
+		fep[0] = i;
+		fep[1] = j;
+		c += 2;
+	}
+	if (*c != ' ')
+		return NULL;
+	++c;
+
+	/* number of drawish plies */
+	long n;
+	c = parse_number(c, &n);
+	if (c == NULL)
+		return NULL;
+	*ndrawplies = n;
+	if (*c != ' ')
+		return NULL;
+	++c;
+
+	/* fullmove number */
+	c = parse_number(c, &n);
+	if (c == NULL)
+		return NULL;
+	*nmove = n;
 
 	return (char *)c;
 }

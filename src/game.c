@@ -27,10 +27,11 @@
 
 #include <cairo/cairo.h>
 
-#include "draw.h"
+#include "notation.h"
+
 #include "game.h"
 
-/* possible = Move is allowed even if king is in check after
+/* pseudolegal = Move is allowed even if king is in check after
    legal = Move is allowed, king is not in check after */
 
 #define HINT_CASTLE 				(1 << 0)
@@ -40,12 +41,9 @@
 #define HINT_EN_PASSANT 			(1 << 4)
 #define HINT_SET_EN_PASSANT_FIELD 		(1 << 5)
 
-#define CASTLERIGHT_QUEENSIDE 			(1 << 0)
-#define CASTLERIGHT_KINGSIDE 			(1 << 1)
-
 /* for testing */
-#define PLIES_BUFSIZE 4
-//#define PLIES_BUFSIZE 64
+//#define PLIES_BUFSIZE 4
+#define PLIES_BUFSIZE 64
 
 #define DRAWISH_MOVES_MAX 50
 
@@ -63,10 +61,11 @@ struct plyinfo_t {
 };
 
 static squareinfo_t position[NF][NF];
-static color_t moving_color;
-static sqid fep[2];
+static color_t active_color;
 static int castlerights[2];
-static int num_drawish_plies;
+static sqid fep[2];
+static unsigned int drawish_plies_num;
+static unsigned int nmove;
 static sqid updates[NUM_UPDATES_MAX][2];
 
 static unsigned int pliesnum;
@@ -75,9 +74,9 @@ static plyinfo_t *plies;
 
 /* debug */
 static void print_hints(int hints);
-static void print_move(plyinfo_t *m);
+static void print_ply(plyinfo_t *m);
 
-static int is_possible_queen_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
+static int is_pseudolegal_queen_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
@@ -115,7 +114,7 @@ static int is_possible_queen_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, in
 
 	return 0;
 }
-static int is_possible_rook_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
+static int is_pseudolegal_rook_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
@@ -146,7 +145,7 @@ static int is_possible_rook_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int
 
 	return 0;
 }
-static int is_possible_bishop_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
+static int is_pseudolegal_bishop_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
@@ -169,7 +168,7 @@ static int is_possible_bishop_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 
 	return 1;
 }
-static int is_possible_knight_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
+static int is_pseudolegal_knight_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
@@ -184,7 +183,7 @@ static int is_possible_knight_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 
 	return 0;
 }
-static int is_possible_pawn_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
+static int is_pseudolegal_pawn_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
@@ -227,19 +226,20 @@ static int is_possible_pawn_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int
 
 	return 0;
 }
-static int is_possible_non_king_move(piece_t piece, sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *flags)
+static int is_pseudolegal_non_king_ply(piece_t piece, sqid ifrom, sqid jfrom,
+		sqid ito, sqid jto, int *flags)
 {
 	switch (piece) {
 	case PIECE_QUEEN:
-		return is_possible_queen_move(ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_queen_ply(ifrom, jfrom, ito, jto, flags);
 	case PIECE_ROOK:
-		return is_possible_rook_move(ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_rook_ply(ifrom, jfrom, ito, jto, flags);
 	case PIECE_BISHOP:
-		return is_possible_bishop_move(ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_bishop_ply(ifrom, jfrom, ito, jto, flags);
 	case PIECE_KNIGHT:
-		return is_possible_knight_move(ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_knight_ply(ifrom, jfrom, ito, jto, flags);
 	case PIECE_PAWN:
-		return is_possible_pawn_move(ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_pawn_ply(ifrom, jfrom, ito, jto, flags);
 	default:
 		assert(0);
 	}
@@ -268,13 +268,13 @@ static int is_king_in_check(color_t c, sqid iking, sqid jking)
 				continue;
 
 			piece_t p = position[i][j] & PIECEMASK;
-			if (is_possible_non_king_move(p, i, j, iking, jking, NULL))
+			if (is_pseudolegal_non_king_ply(p, i, j, iking, jking, NULL))
 				return 1;
 		}
 	}
 	return 0;
 }
-static int is_possible_king_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
+static int is_pseudolegal_king_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
@@ -319,12 +319,12 @@ static int is_possible_king_move(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int
 
 	return 0;
 }
-static int is_possible_move(piece_t piece, sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *flags)
+static int is_pseudolegal_ply(piece_t piece, sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *flags)
 {
 	if (piece == PIECE_KING) {
-		return is_possible_king_move(ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_king_ply(ifrom, jfrom, ito, jto, flags);
 	} else {
-		return is_possible_non_king_move(piece, ifrom, jfrom, ito, jto, flags);
+		return is_pseudolegal_non_king_ply(piece, ifrom, jfrom, ito, jto, flags);
 	}
 }
 
@@ -344,11 +344,14 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 	memcpy(ply.fep, fep, sizeof(fep));
 	memcpy(ply.castlerights, castlerights, sizeof(ply.castlerights));
 	memcpy(ply.position, position, sizeof(ply.position));
-	ply.ndrawplies = num_drawish_plies;
+	ply.ndrawplies = drawish_plies_num;
 	ply.hints = hints;
-	memset(updates, 0xff, 2 * NUM_UPDATES_MAX * sizeof(sqid));
 
-	/* apply bare move */
+	memset(updates, 0xff, sizeof(updates));
+	fep[0] = -1;
+	fep[1] = -1;
+
+	/* apply bare ply */
 	position[ito][jto] = position[ifrom][jfrom];
 	memcpy(updates[0], ply.from, sizeof(updates[0]));
 
@@ -392,14 +395,21 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 	if (hints & HINT_DEL_CASTLERIGHT_KINGSIDE)
 		castlerights[c] &= ~CASTLERIGHT_KINGSIDE;
 
-	/* count move for fifty-move rule */
+	/* count drawish plies for fifty-move rule */
 	if ((ply.taken & PIECEMASK) == PIECE_NONE && ply.p != PIECE_PAWN) {
-		++num_drawish_plies;
+		++drawish_plies_num;
 	} else {
-		num_drawish_plies = 0;
+		drawish_plies_num = 0;
 	}
 
-	/* add move to list */
+	/* update fullmove number */
+	if (active_color == COLOR_BLACK)
+		++nmove;
+
+	/* update active color */
+	active_color = OPP_COLOR(active_color);
+
+	/* add ply to list */
 	if (pliesnum == pliessize) {
 		pliessize += PLIES_BUFSIZE;
 		plyinfo_t *p = realloc(plies, pliessize * sizeof(*p));
@@ -420,13 +430,15 @@ static void undo_last_ply()
 	sqid ito = ply.to[0];
 	sqid jto = ply.to[1];
 	color_t c = position[ito][jto] & COLORMASK;
-	/* fill updates with -1 */
-	memset(updates, 0xff, 2 * NUM_UPDATES_MAX * sizeof(sqid));
+
+	memset(updates, 0xff, sizeof(updates));
+	memcpy(fep, ply.fep, sizeof(fep));
+
 	/* remove ply from list */
 	--pliesnum;
 
 	/* restore fifty-move rule count */
-	num_drawish_plies = ply.ndrawplies;
+	drawish_plies_num = ply.ndrawplies;
 
 	/* undo hints */
 	if (ply.hints & HINT_DEL_CASTLERIGHT_QUEENSIDE)
@@ -457,13 +469,18 @@ static void undo_last_ply()
 		position[ito][jfrom] = ply.taken;
 		updates[2][0] = jto;
 		updates[2][1] = jfrom;
-	} else if (ply.hints & HINT_SET_EN_PASSANT_FIELD) {
-		memcpy(fep, ply.fep, sizeof(fep));
 	} else if (ply.hints & HINT_PROMOTION) {
 		position[ito][jto] = (position[ito][jto] & COLORMASK) | PIECE_PAWN;
 	}
 
-	/* undo bare move */
+	/* update fullmove number */
+	if (active_color == COLOR_WHITE)
+		--nmove;
+
+	/* update active color */
+	active_color = OPP_COLOR(active_color);
+
+	/* undo bare ply */
 	position[ifrom][jfrom] = position[ito][jto];
 	memcpy(updates[1], ply.from, sizeof(updates[1]));
 
@@ -471,7 +488,7 @@ static void undo_last_ply()
 	memcpy(updates[1], ply.to, sizeof(updates[0]));
 }
 
-static int piece_has_legal_move(sqid ipiece, sqid jpiece)
+static int piece_has_legal_ply(sqid ipiece, sqid jpiece)
 {
 	piece_t p = position[ipiece][jpiece] & PIECEMASK;
 	color_t c = position[ipiece][jpiece] & COLORMASK;
@@ -484,7 +501,7 @@ static int piece_has_legal_move(sqid ipiece, sqid jpiece)
 				continue;
 
 			int hints;
-			if (!is_possible_move(p, ipiece, jpiece, i, j, &hints))
+			if (!is_pseudolegal_ply(p, ipiece, jpiece, i, j, &hints))
 				continue;
 
 			plyinfo_t m;
@@ -504,14 +521,14 @@ static int piece_has_legal_move(sqid ipiece, sqid jpiece)
 	}
 	return 0;
 }
-static int has_legal_move(color_t color)
+static int has_legal_ply(color_t color)
 {
 	for (sqid j = 0; j < NF; ++j) {
 		for (sqid i = 0; i < NF; ++i) {
 			if ((position[i][j] & PIECEMASK) == PIECE_NONE
 					|| (position[i][j] & COLORMASK) != color)
 				continue;
-			if (piece_has_legal_move(i, j))
+			if (piece_has_legal_ply(i, j))
 				return 1;
 		}
 	}
@@ -520,48 +537,40 @@ static int has_legal_move(color_t color)
 
 int game_init(void)
 {
-	moving_color = COLOR_WHITE;
-	memset(fep, 0xff, sizeof(fep));
-	castlerights[0] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
-	castlerights[1] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
+	int err = game_load_fen(STARTPOS_FEN);
+	assert(!err);
 
-	sqid pawnrows[2];
-	sqid piecerows[2];
-	piecerows[0] = 0;
-	piecerows[1] = NF - 1;
-	pawnrows[0] = 1;
-	pawnrows[1] = NF - 2;
+	//active_color = COLOR_WHITE;
+	//memset(fep, 0xff, sizeof(fep));
+	//castlerights[0] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
+	//castlerights[1] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
 
-	for (int j = 0; j < NUM_COLORS; ++j) {
-		position[0][piecerows[j]] = PIECE_ROOK | j;
-		position[1][piecerows[j]] = PIECE_KNIGHT | j;
-		position[2][piecerows[j]] = PIECE_BISHOP | j;
-		position[3][piecerows[j]] = PIECE_QUEEN | j;
-		position[4][piecerows[j]] = PIECE_KING | j;
-		position[5][piecerows[j]] = PIECE_BISHOP | j;
-		position[6][piecerows[j]] = PIECE_KNIGHT | j;
-		position[7][piecerows[j]] = PIECE_ROOK | j;
-		for (int i = 0; i < NF; ++i) {
-			position[i][pawnrows[j]] = PIECE_PAWN | j;
-		}
-	}
+	//sqid pawnrows[2];
+	//sqid piecerows[2];
+	//piecerows[0] = 0;
+	//piecerows[1] = NF - 1;
+	//pawnrows[0] = 1;
+	//pawnrows[1] = NF - 2;
+
+	//for (int j = 0; j < NUM_COLORS; ++j) {
+	//	position[0][piecerows[j]] = PIECE_ROOK | j;
+	//	position[1][piecerows[j]] = PIECE_KNIGHT | j;
+	//	position[2][piecerows[j]] = PIECE_BISHOP | j;
+	//	position[3][piecerows[j]] = PIECE_QUEEN | j;
+	//	position[4][piecerows[j]] = PIECE_KING | j;
+	//	position[5][piecerows[j]] = PIECE_BISHOP | j;
+	//	position[6][piecerows[j]] = PIECE_KNIGHT | j;
+	//	position[7][piecerows[j]] = PIECE_ROOK | j;
+	//	for (int i = 0; i < NF; ++i) {
+	//		position[i][pawnrows[j]] = PIECE_PAWN | j;
+	//	}
+	//}
 
 	pliessize = PLIES_BUFSIZE;
 	plies = malloc(pliessize * sizeof(*plies));
 	if (!plies)
 		return -1;
 	return 0;
-}
-void game_init_test_board(void)
-{
-	moving_color = COLOR_WHITE;
-	memset(fep, 0xff, sizeof(fep));
-	castlerights[0] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
-	castlerights[1] = CASTLERIGHT_KINGSIDE | CASTLERIGHT_QUEENSIDE;
-
-	position[4][0] = PIECE_KING | COLOR_WHITE;
-	position[4][NF - 1] = PIECE_KING | COLOR_BLACK;
-	position[0][6] = PIECE_PAWN;
 }
 void game_terminate(void)
 {
@@ -572,18 +581,18 @@ int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece)
 {
 	piece_t piece = position[ifrom][jfrom] & PIECEMASK;
 
-	/* check if move is possible */
+	/* check if ply is pseudolegal */
 	int hints;
-	if (!is_possible_move(piece, ifrom, jfrom, ito, jto, &hints))
+	if (!is_pseudolegal_ply(piece, ifrom, jfrom, ito, jto, &hints))
 		return 1;
 
-	/* apply move */
+	/* exec ply */
 	exec_ply(ifrom, jfrom, ito, jto, hints, prompiece);
 
-	/* check if move is legal */
+	/* check if ply is legal */
 	sqid iking, jking;
-	get_king(moving_color, &iking, &jking);
-	if (is_king_in_check(moving_color, iking, jking)) {
+	get_king(active_color, &iking, &jking);
+	if (is_king_in_check(active_color, iking, jking)) {
 		undo_last_ply();
 		return 1;
 	}
@@ -594,7 +603,6 @@ int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece)
 		return 2;
 	}
 
-	moving_color = OPP_COLOR(moving_color);
 	return 0;
 }
 void game_undo_last_ply(void)
@@ -602,9 +610,9 @@ void game_undo_last_ply(void)
 	undo_last_ply();
 }
 
-color_t game_get_moving_color()
+color_t game_get_active_color()
 {
-	return moving_color;
+	return active_color;
 }
 piece_t game_get_piece(sqid i, sqid j)
 {
@@ -625,17 +633,17 @@ int game_get_move_number(void)
 int game_is_stalemate(void)
 {
 	sqid iking, jking;
-	get_king(moving_color, &iking, &jking);
+	get_king(active_color, &iking, &jking);
 
-	if (is_king_in_check(moving_color, iking, jking))
+	if (is_king_in_check(active_color, iking, jking))
 		return 0;
 
 	for (sqid j = 0; j < NF; ++j) {
 		for (sqid i = 0; i < NF; ++i) {
 			if ((position[i][j] & PIECEMASK) == PIECE_NONE
-					|| (position[i][j] & COLORMASK) != moving_color)
+					|| (position[i][j] & COLORMASK) != active_color)
 				continue;
-			if (piece_has_legal_move(i, j))
+			if (piece_has_legal_ply(i, j))
 				return 0;
 		}
 	}
@@ -645,17 +653,17 @@ int game_is_stalemate(void)
 int game_is_checkmate(void)
 {
 	sqid iking, jking;
-	get_king(moving_color, &iking, &jking);
+	get_king(active_color, &iking, &jking);
 
-	if (!is_king_in_check(moving_color, iking, jking))
+	if (!is_king_in_check(active_color, iking, jking))
 		return 0;
 
 	for (sqid j = 0; j < NF; ++j) {
 		for (sqid i = 0; i < NF; ++i) {
 			if ((position[i][j] & PIECEMASK) == PIECE_NONE
-					|| (position[i][j] & COLORMASK) != moving_color)
+					|| (position[i][j] & COLORMASK) != active_color)
 				continue;
-			if (piece_has_legal_move(i, j))
+			if (piece_has_legal_ply(i, j))
 				return 0;
 		}
 	}
@@ -665,7 +673,7 @@ int game_is_checkmate(void)
 int game_is_movable_piece_at(sqid i, sqid j)
 {
 	return ((position[i][j] & PIECEMASK) != PIECE_NONE)
-		&& (position[i][j] & COLORMASK) == moving_color;
+		&& (position[i][j] & COLORMASK) == active_color;
 }
 int game_last_ply_was_capture(void)
 {
@@ -722,12 +730,12 @@ void game_get_status(status_t *externstatus)
 	assert(*externstatus == STATUS_MOVING_WHITE || *externstatus == STATUS_MOVING_BLACK);
 
 	/* check- or stalemate? */
-	if (!has_legal_move(moving_color)) {
+	if (!has_legal_ply(active_color)) {
 		sqid iking, jking;
-		get_king(moving_color, &iking, &jking);
+		get_king(active_color, &iking, &jking);
 
-		if (is_king_in_check(moving_color, iking, jking)) {
-			*externstatus = moving_color ?
+		if (is_king_in_check(active_color, iking, jking)) {
+			*externstatus = active_color ?
 				STATUS_CHECKMATE_BLACK : STATUS_CHECKMATE_WHITE;
 		} else {
 			*externstatus = STATUS_DRAW_STALEMATE;
@@ -763,17 +771,28 @@ void game_get_status(status_t *externstatus)
 	}
 
 	/* draw by fifty move rule? */
-	if (num_drawish_plies >= DRAWISH_MOVES_MAX * 2) {
+	if (drawish_plies_num >= DRAWISH_MOVES_MAX * 2) {
 		*externstatus = STATUS_DRAW_FIFTY_MOVES;
 		return;
 	}
 
 	/* just moving */
-	*externstatus = moving_color ? STATUS_MOVING_BLACK : STATUS_MOVING_WHITE;
+	*externstatus = active_color ? STATUS_MOVING_BLACK : STATUS_MOVING_WHITE;
 }
 void game_get_updates(sqid u[][2])
 {
 	memcpy(u, updates, 2 * NUM_UPDATES_MAX * sizeof(sqid));
+}
+
+int game_load_fen(const char *s)
+{
+	if (!parse_fen(s, position, &active_color, castlerights, fep, &drawish_plies_num, &nmove))
+		return 1;
+	return 0;
+}
+void game_get_fen(char *s)
+{
+	format_fen(position, active_color, castlerights, fep, drawish_plies_num, nmove, s);
 }
 
 /* debug */
@@ -793,7 +812,7 @@ static void print_hints(int hints)
 		}
 	}
 }
-static void print_move(plyinfo_t *m)
+static void print_ply(plyinfo_t *m)
 {
 	char squarefrom[3] = {0};
 	char squareto[3] = {0};
