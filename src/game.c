@@ -437,6 +437,13 @@ static void undo_last_ply()
 	/* remove ply from list */
 	--pliesnum;
 
+	/* update active color */
+	active_color = OPP_COLOR(active_color);
+
+	/* update fullmove number */
+	if (active_color == COLOR_BLACK)
+		--nmove;
+
 	/* restore fifty-move rule count */
 	drawish_plies_num = ply.ndrawplies;
 
