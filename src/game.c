@@ -79,7 +79,8 @@ static void print_ply(plyinfo_t *m);
 static int is_pseudolegal_queen_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
-	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
+	if (((position[ito][jto] & PIECEMASK) != PIECE_NONE)
+			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -117,7 +118,8 @@ static int is_pseudolegal_queen_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, 
 static int is_pseudolegal_rook_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
-	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
+	if (((position[ito][jto] & PIECEMASK) != PIECE_NONE)
+			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints) {
@@ -148,7 +150,8 @@ static int is_pseudolegal_rook_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 static int is_pseudolegal_bishop_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
-	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
+	if (((position[ito][jto] & PIECEMASK) != PIECE_NONE)
+			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -171,7 +174,8 @@ static int is_pseudolegal_bishop_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto,
 static int is_pseudolegal_knight_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
-	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
+	if (((position[ito][jto] & PIECEMASK) != PIECE_NONE)
+			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -186,7 +190,8 @@ static int is_pseudolegal_knight_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto,
 static int is_pseudolegal_pawn_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
-	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
+	if (((position[ito][jto] & PIECEMASK) != PIECE_NONE)
+			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints)
@@ -277,7 +282,8 @@ static int is_king_in_check(color_t c, sqid iking, sqid jking)
 static int is_pseudolegal_king_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
-	if ((position[ito][jto] != PIECE_NONE) && (position[ito][jto] & COLORMASK) == c)
+	if (((position[ito][jto] & PIECEMASK) != PIECE_NONE)
+			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
 	if (hints) {
@@ -688,7 +694,7 @@ int game_has_sufficient_mating_material(color_t color)
 	int nknights = 0;
 	for (int j = 0; j < NF; ++j) {
 		for (int i = 0; i < NF; ++i) {
-			switch (position[i][j]) {
+			switch (position[i][j] & PIECEMASK) {
 			case PIECE_KING:
 				hasking = 1;
 				break;
