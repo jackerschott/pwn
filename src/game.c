@@ -378,7 +378,7 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 			updates[3][1] = jfrom;
 		}
 	} else if (hints & HINT_EN_PASSANT) {
-		ply.taken = position[ito][jfrom];
+		ply.taken = position[ito][jfrom] & PIECEMASK;
 
 		position[ito][jfrom] = PIECE_NONE;
 		updates[2][0] = ito;
@@ -473,25 +473,19 @@ static void undo_last_ply()
 			updates[2][1] = jfrom;
 		}
 	} else if (ply.hints & HINT_EN_PASSANT) {
-		position[ito][jfrom] = ply.taken;
+		position[ito][jfrom] = ply.taken | OPP_COLOR(active_color);
 		updates[2][0] = jto;
 		updates[2][1] = jfrom;
 	} else if (ply.hints & HINT_PROMOTION) {
 		position[ito][jto] = (position[ito][jto] & COLORMASK) | PIECE_PAWN;
 	}
 
-	/* update fullmove number */
-	if (active_color == COLOR_WHITE)
-		--nmove;
-
-	/* update active color */
-	active_color = OPP_COLOR(active_color);
-
 	/* undo bare ply */
 	position[ifrom][jfrom] = position[ito][jto];
 	memcpy(updates[1], ply.from, sizeof(updates[1]));
 
-	position[ito][jto] = (ply.hints & HINT_EN_PASSANT) ? PIECE_NONE : ply.taken;
+	position[ito][jto] = (ply.hints & HINT_EN_PASSANT) ?
+		PIECE_NONE : (ply.taken | OPP_COLOR(active_color));
 	memcpy(updates[1], ply.to, sizeof(updates[0]));
 }
 
