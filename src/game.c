@@ -136,7 +136,7 @@ static int is_pseudolegal_rook_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 		}
 		return 1;
 	} else if (jto - jfrom == 0) { /* horizontally */
-		for (int i = MIN(jfrom, jto) + 1; i < MAX(jfrom, jto); ++i) {
+		for (int i = MIN(ifrom, ito) + 1; i < MAX(ifrom, ito); ++i) {
 			if ((position[i][jfrom] & PIECEMASK) != PIECE_NONE)
 				return 0;
 		}
