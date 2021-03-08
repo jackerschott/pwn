@@ -258,17 +258,17 @@ static void get_king(color_t c, sqid *i, sqid *j)
 		}
 	}
 }
-static int is_king_in_check(color_t c, sqid iking, sqid jking)
+static int is_square_non_king_attacked(color_t c, sqid i, sqid j)
 {
-	for (sqid j = 0; j < NF; ++j) {
-		for (sqid i = 0; i < NF; ++i) {
-			if ((position[i][j] & PIECEMASK) == PIECE_NONE
-					|| (position[i][j] & PIECEMASK) == PIECE_KING
-					|| (position[i][j] & COLORMASK) == c)
+	for (sqid l = 0; l < NF; ++l) {
+		for (sqid k = 0; k < NF; ++k) {
+			if ((position[k][l] & PIECEMASK) == PIECE_NONE
+					|| (position[k][l] & PIECEMASK) == PIECE_KING
+					|| (position[k][l] & COLORMASK) == c)
 				continue;
 
-			piece_t p = position[i][j] & PIECEMASK;
-			if (is_pseudolegal_non_king_ply(p, i, j, iking, jking, NULL))
+			piece_t p = position[k][l] & PIECEMASK;
+			if (is_pseudolegal_non_king_ply(p, k, l, i, j, NULL))
 				return 1;
 		}
 	}
@@ -297,7 +297,8 @@ static int is_pseudolegal_king_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 				|| (position[NF - 3][jto] & PIECEMASK) != PIECE_NONE)
 			return 0;
 
-		if (is_king_in_check(c, ifrom, jfrom))
+		if (is_square_non_king_attacked(c, NF - 4, jto)
+				|| is_square_non_king_attacked(c, NF - 3, jto))
 			return 0;
 
 		if (hints)
@@ -310,7 +311,8 @@ static int is_pseudolegal_king_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 				|| (position[3][jto] & PIECEMASK) != PIECE_NONE)
 			return 0;
 
-		if (is_king_in_check(c, ifrom, jfrom))
+		if (is_square_non_king_attacked(c, 3, jto)
+				|| is_square_non_king_attacked(c, 4, jto))
 			return 0;
 
 		if (hints)
@@ -514,9 +516,9 @@ static int piece_has_legal_ply(sqid ipiece, sqid jpiece)
 
 			int check;
 			if (p == PIECE_KING) {
-				check = is_king_in_check(c, i, j);
+				check = is_square_non_king_attacked(c, i, j);
 			} else {
-				check = is_king_in_check(c, iking, jking);
+				check = is_square_non_king_attacked(c, iking, jking);
 			}
 
 			undo_last_ply();
@@ -571,7 +573,7 @@ int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece)
 	/* check if ply is legal */
 	sqid iking, jking;
 	get_king(OPP_COLOR(active_color), &iking, &jking);
-	if (is_king_in_check(OPP_COLOR(active_color), iking, jking)) {
+	if (is_square_non_king_attacked(OPP_COLOR(active_color), iking, jking)) {
 		undo_last_ply();
 		return 1;
 	}
@@ -614,7 +616,7 @@ int game_is_stalemate(void)
 	sqid iking, jking;
 	get_king(active_color, &iking, &jking);
 
-	if (is_king_in_check(active_color, iking, jking))
+	if (is_square_non_king_attacked(active_color, iking, jking))
 		return 0;
 
 	for (sqid j = 0; j < NF; ++j) {
@@ -634,7 +636,7 @@ int game_is_checkmate(void)
 	sqid iking, jking;
 	get_king(active_color, &iking, &jking);
 
-	if (!is_king_in_check(active_color, iking, jking))
+	if (!is_square_non_king_attacked(active_color, iking, jking))
 		return 0;
 
 	for (sqid j = 0; j < NF; ++j) {
@@ -713,7 +715,7 @@ void game_get_status(status_t *externstatus)
 		sqid iking, jking;
 		get_king(active_color, &iking, &jking);
 
-		if (is_king_in_check(active_color, iking, jking)) {
+		if (is_square_non_king_attacked(active_color, iking, jking)) {
 			*externstatus = active_color ?
 				STATUS_CHECKMATE_BLACK : STATUS_CHECKMATE_WHITE;
 		} else {
