@@ -598,8 +598,8 @@ int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece)
 
 	/* check if ply is legal */
 	sqid iking, jking;
-	get_king(active_color, &iking, &jking);
-	if (is_king_in_check(active_color, iking, jking)) {
+	get_king(OPP_COLOR(active_color), &iking, &jking);
+	if (is_king_in_check(OPP_COLOR(active_color), iking, jking)) {
 		undo_last_ply();
 		return 1;
 	}
