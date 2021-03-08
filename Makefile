@@ -22,7 +22,7 @@ MANPREFIX = $(PREFIX)/share/man
 
 export BINNAME = pwn
 export BUILDDIR = build
-TESTNAMES = notationtest
+TESTNAMES = notationtest gametest
 
 $(BINNAME): $(BUILDDIR)
 	$(MAKE) -C src ROOTDIR=..

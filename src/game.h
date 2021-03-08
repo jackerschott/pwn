@@ -27,7 +27,7 @@
 
 typedef struct plyinfo_t plyinfo_t;
 
-int game_init(void);
+int game_init(const char *fen);
 void game_terminate(void);
 
 int game_exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, piece_t prompiece);

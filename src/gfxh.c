@@ -1075,7 +1075,7 @@ static void gfxh_setup(void)
 	board.squaresize = wa.height / NF;
 
 	pthread_mutex_lock(&hctx->gamelock);
-	err = game_init();
+	err = game_init(STARTPOS_FEN);
 	pthread_mutex_unlock(&hctx->gamelock);
 	if (err == -1) {
 		SYSERR();

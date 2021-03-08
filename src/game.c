@@ -535,9 +535,9 @@ static int has_legal_ply(color_t color)
 	return 0;
 }
 
-int game_init(void)
+int game_init(const char *fen)
 {
-	int err = game_load_fen(STARTPOS_FEN);
+	int err = game_load_fen(fen);
 	assert(!err);
 
 	//active_color = COLOR_WHITE;
