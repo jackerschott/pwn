@@ -38,7 +38,7 @@ size_t format_move(piece_t piece, sqid from[2], sqid to[2], piece_t prompiece, c
 	size_t len;
 	char *c = str;
 	if (piece != PIECE_PAWN) {
-		*c = piece_symbols[PIECE_IDX(piece)];
+		*c = toupper(piece_symbols[PIECE_IDX(piece)]);
 		++c;
 	}
 
@@ -50,7 +50,7 @@ size_t format_move(piece_t piece, sqid from[2], sqid to[2], piece_t prompiece, c
 	c += 5;
 
 	if (prompiece != PIECE_NONE) {
-		*c = piece_symbols[PIECE_IDX(prompiece)];
+		*c = toupper(piece_symbols[PIECE_IDX(prompiece)]);
 		++c;
 	}
 
