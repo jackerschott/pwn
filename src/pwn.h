@@ -68,10 +68,10 @@
 #define OPP_COLOR(c) ((c) ^ COLORMASK)
 #define PIECE_IDX(p) ((p) / 2 - 1)
 #define PIECE_BY_IDX(i) (2 * (i) + 2)
-#define ROW_CHAR(j) ('a' + (j))
-#define COL_CHAR(i) ('1' + (i))
-#define ROW_BY_CHAR(c) ((c) - 'a')
-#define COL_BY_CHAR(c) ((c) - '1')
+#define FILE_CHAR(j) ('a' + (j))
+#define RANK_CHAR(i) ('1' + (i))
+#define FILE_BY_CHAR(c) ((c) - 'a')
+#define RANK_BY_CHAR(c) ((c) - '1')
 
 #define COLORMASK 0b0001
 enum color_t {

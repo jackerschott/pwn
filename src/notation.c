@@ -42,11 +42,11 @@ size_t format_move(piece_t piece, sqid from[2], sqid to[2], piece_t prompiece, c
 		++c;
 	}
 
-	c[0] = ROW_CHAR(from[0]);
-	c[1] = COL_CHAR(from[1]);
+	c[0] = FILE_CHAR(from[0]);
+	c[1] = RANK_CHAR(from[1]);
 	c[2] = '-';
-	c[3] = ROW_CHAR(to[0]);
-	c[4] = COL_CHAR(to[1]);
+	c[3] = FILE_CHAR(to[0]);
+	c[4] = RANK_CHAR(to[1]);
 	c += 5;
 
 	if (prompiece != PIECE_NONE) {
@@ -146,12 +146,12 @@ char *parse_move(const char *s, piece_t *piece,
 	/* get start and destination field */
 	if (*c < 'a' || *c > 'h')
 		return NULL;
-	from[0] = ROW_BY_CHAR(*c);
+	from[0] = FILE_BY_CHAR(*c);
 	++c;
 
 	if (*c < '1' || *c > '8')
 		return NULL;
-	from[1] = COL_BY_CHAR(*c);
+	from[1] = RANK_BY_CHAR(*c);
 	++c;
 
 	if (*c != '-')
@@ -160,12 +160,12 @@ char *parse_move(const char *s, piece_t *piece,
 
 	if (*c < 'a' || *c > 'h')
 		return NULL;
-	to[0] = ROW_BY_CHAR(*c);
+	to[0] = FILE_BY_CHAR(*c);
 	++c;
 
 	if (*c < '1' || *c > '8')
 		return NULL;
-	to[1] = COL_BY_CHAR(*c);
+	to[1] = RANK_BY_CHAR(*c);
 	++c;
 
 	/* get prompiece */
@@ -308,8 +308,8 @@ size_t format_fen(squareinfo_t position[NF][NF], color_t active_color,
 		*c = '-';
 		++c;
 	} else {
-		c[0] = ROW_CHAR(fep[0]);
-		c[1] = COL_CHAR(fep[1]);
+		c[0] = FILE_CHAR(fep[0]);
+		c[1] = RANK_CHAR(fep[1]);
 		c += 2;
 	}
 	*c = ' ';
@@ -417,8 +417,8 @@ char *parse_fen(const char *s, squareinfo_t position[NF][NF], color_t *active_co
 		fep[1] = -1;
 		++c;
 	} else {
-		int i = ROW_BY_CHAR(c[0]);
-		int j = COL_BY_CHAR(c[1]);
+		int i = FILE_BY_CHAR(c[0]);
+		int j = RANK_BY_CHAR(c[1]);
 		if (i < 0 || i >= NF || j < 0 || j >= NF)
 			return NULL;
 

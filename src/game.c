@@ -57,6 +57,7 @@ struct plyinfo_t {
 	int castlerights[2];
 	squareinfo_t position[NF][NF];
 	int ndrawplies;
+	int nmove;
 	int hints;
 };
 
@@ -122,14 +123,8 @@ static int is_pseudolegal_rook_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 			&& (position[ito][jto] & COLORMASK) == c)
 		return 0;
 
-	if (hints) {
+	if (hints)
 		*hints = 0;
-		if ((castlerights[c] & CASTLERIGHT_QUEENSIDE) && ifrom == 0) {
-			*hints |= HINT_DEL_CASTLERIGHT_QUEENSIDE;
-		} else if ((castlerights[c] & CASTLERIGHT_KINGSIDE) && ifrom == NF - 1) {
-			*hints |= HINT_DEL_CASTLERIGHT_KINGSIDE;
-		}
-	}
 
 	if (ito - ifrom == 0) { /* vertically */
 		for (int j = MIN(jfrom, jto) + 1; j < MAX(jfrom, jto); ++j) {
@@ -201,18 +196,18 @@ static int is_pseudolegal_pawn_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 	int dj = jto - jfrom;
 
 	int step = 1 - 2 * c;
-	int promrow = (1 - c) * (NF - 1);
-	int pawnrow = c * (NF - 2) + (1 - c);
+	int promrank = OPP_COLOR(c) * (NF - 1);
+	int pawnrank = c * (NF - 2) + OPP_COLOR(c);
 	if (dj == step && di == 0) { /* normal step */
 		if ((position[ito][jto] & PIECEMASK) == PIECE_NONE) {
-			if (hints && jto == promrow)
+			if (hints && jto == promrank)
 				*hints |= HINT_PROMOTION;
 			return 1;
 		}
 	} else if (dj == step && abs(di) == 1) { /* diagonal step with take */
 		if ((position[ito][jto] & PIECEMASK) != PIECE_NONE
 				&& (position[ito][jto] & COLORMASK) != c) {
-			if (hints && jto == promrow)
+			if (hints && jto == promrank)
 				*hints |= HINT_PROMOTION;
 			return 1;
 		} else if (ito == fep[0] && jto == fep[1]) {
@@ -220,7 +215,7 @@ static int is_pseudolegal_pawn_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 				*hints |= HINT_EN_PASSANT;
 			return 1;
 		}
-	} else if (jfrom == pawnrow && dj == 2 * step && di == 0) { /* 2 square step from pawnrow */
+	} else if (jfrom == pawnrank && dj == 2 * step && di == 0) { /* 2 square step from pawnrank */
 		if ((position[ito][jto - step] & PIECEMASK) == PIECE_NONE
 				&& (position[ito][jto] & PIECEMASK) == PIECE_NONE) {
 			if (hints)
@@ -294,10 +289,10 @@ static int is_pseudolegal_king_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 			*hints |= HINT_DEL_CASTLERIGHT_QUEENSIDE;
 	}
 
-	if (abs(ito - ifrom) <= 1 && abs(jto - jfrom) <= 1) {
+	if (abs(ito - ifrom) <= 1 && abs(jto - jfrom) <= 1) { /* normal ply */
 		return 1;
 	} else if (ito == NF - 2 && (jto == 0 || jto == NF - 1)
-			&& (castlerights[c] & CASTLERIGHT_KINGSIDE)) {
+			&& (castlerights[c] & CASTLERIGHT_KINGSIDE)) { /* kingside castle */
 		if ((position[NF - 2][jto] & PIECEMASK) != PIECE_NONE
 				|| (position[NF - 3][jto] & PIECEMASK) != PIECE_NONE)
 			return 0;
@@ -309,7 +304,7 @@ static int is_pseudolegal_king_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, i
 			*hints |= HINT_CASTLE;
 		return 1;
 	} else if (ito == 2 && (jto == 0 || jto == NF - 1)
-			&& (castlerights[c] & CASTLERIGHT_QUEENSIDE)) {
+			&& (castlerights[c] & CASTLERIGHT_QUEENSIDE)) { /* queenside castle */
 		if ((position[1][jto] & PIECEMASK) != PIECE_NONE
 				|| (position[2][jto] & PIECEMASK) != PIECE_NONE
 				|| (position[3][jto] & PIECEMASK) != PIECE_NONE)
@@ -351,6 +346,7 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 	memcpy(ply.castlerights, castlerights, sizeof(ply.castlerights));
 	memcpy(ply.position, position, sizeof(ply.position));
 	ply.ndrawplies = drawish_plies_num;
+	ply.nmove = nmove;
 	ply.hints = hints;
 
 	memset(updates, 0xff, sizeof(updates));
@@ -396,10 +392,20 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 		position[ito][jto] = (position[ito][jto] & COLORMASK) | prompiece;
 	}
 
+	/* remove castle rights */
 	if (hints & HINT_DEL_CASTLERIGHT_QUEENSIDE)
 		castlerights[c] &= ~CASTLERIGHT_QUEENSIDE;
 	if (hints & HINT_DEL_CASTLERIGHT_KINGSIDE)
 		castlerights[c] &= ~CASTLERIGHT_KINGSIDE;
+
+	int oc = OPP_COLOR(c);
+	int backrank = oc * (NF - 1);
+	if (castlerights[oc] & CASTLERIGHT_QUEENSIDE
+			&& (position[0][backrank] & PIECEMASK) != PIECE_ROOK)
+		castlerights[oc] &= ~CASTLERIGHT_QUEENSIDE;
+	if (castlerights[oc] & CASTLERIGHT_KINGSIDE
+			&& (position[NF - 1][backrank] & PIECEMASK) != PIECE_ROOK)
+		castlerights[oc] &= ~CASTLERIGHT_KINGSIDE;
 
 	/* count drawish plies for fifty-move rule */
 	if ((ply.taken & PIECEMASK) == PIECE_NONE && ply.p != PIECE_PAWN) {
@@ -430,6 +436,7 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 static void undo_last_ply()
 {
 	assert(pliesnum > 0);
+
 	plyinfo_t ply = plies[pliesnum - 1];
 	sqid ifrom = ply.from[0];
 	sqid jfrom = ply.from[1];
@@ -443,22 +450,13 @@ static void undo_last_ply()
 	/* remove ply from list */
 	--pliesnum;
 
-	/* update active color */
+	/* restore active color, fullmove number, drawish plies and castlerights */
 	active_color = OPP_COLOR(active_color);
-
-	/* update fullmove number */
-	if (active_color == COLOR_BLACK)
-		--nmove;
-
-	/* restore fifty-move rule count */
+	nmove = ply.nmove;
 	drawish_plies_num = ply.ndrawplies;
+	memcpy(castlerights, ply.castlerights, sizeof(castlerights));
 
 	/* undo hints */
-	if (ply.hints & HINT_DEL_CASTLERIGHT_QUEENSIDE)
-		castlerights[c] |= CASTLERIGHT_QUEENSIDE;
-	if (ply.hints & HINT_DEL_CASTLERIGHT_KINGSIDE)
-		castlerights[c] |= CASTLERIGHT_KINGSIDE;
-
 	if (ply.hints & HINT_CASTLE) {
 		if (ito > ifrom) {
 			position[NF - 1][jfrom] = position[NF - 3][jfrom];
