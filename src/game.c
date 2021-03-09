@@ -47,7 +47,7 @@
 
 #define DRAWISH_MOVES_MAX 50
 
-struct plyinfo_t {
+struct ply_t {
 	piece_t p;
 	sqid from[2];
 	sqid to[2];
@@ -67,15 +67,14 @@ static int castlerights[2];
 static sqid fep[2];
 static unsigned int drawish_plies_num;
 static unsigned int nmove;
-static sqid updates[NUM_UPDATES_MAX][2];
 
 static unsigned int pliesnum;
 static unsigned int pliessize;
-static plyinfo_t *plies;
+static ply_t *plies;
 
 /* debug */
 static void print_hints(int hints);
-static void print_ply(plyinfo_t *m);
+static void print_ply(ply_t *m);
 
 static int is_pseudolegal_queen_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int *hints)
 {
@@ -335,7 +334,7 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 {
 	color_t c = position[ifrom][jfrom] & COLORMASK;
 
-	plyinfo_t ply;
+	ply_t ply;
 	memset(&ply, 0, sizeof(ply));
 	ply.p = position[ifrom][jfrom] & PIECEMASK;
 	ply.from[0] = ifrom;
@@ -351,42 +350,26 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 	ply.nmove = nmove;
 	ply.hints = hints;
 
-	memset(updates, 0xff, sizeof(updates));
 	fep[0] = -1;
 	fep[1] = -1;
 
 	/* apply bare ply */
 	position[ito][jto] = position[ifrom][jfrom];
-	memcpy(updates[0], ply.from, sizeof(updates[0]));
-
 	position[ifrom][jfrom] = PIECE_NONE;
-	memcpy(updates[1], ply.to, sizeof(updates[0]));
 
 	/* apply hints */
 	if (hints & HINT_CASTLE) {
 		if (ito > ifrom) {
 			position[NF - 3][jfrom] = position[NF - 1][jfrom];
-			updates[2][0] = NF - 3;
-			updates[2][1] = jfrom;
-
 			position[NF - 1][jfrom] = PIECE_NONE;
-			updates[3][0] = NF - 1;
-			updates[3][1] = jfrom;
 		} else {
 			position[3][jfrom] = position[0][jfrom];
-			updates[2][0] = 3;
-			updates[2][1] = jfrom;
-
 			position[0][jfrom] = PIECE_NONE;
-			updates[3][0] = 0;
-			updates[3][1] = jfrom;
 		}
 	} else if (hints & HINT_EN_PASSANT) {
 		ply.taken = position[ito][jfrom] & PIECEMASK;
 
 		position[ito][jfrom] = PIECE_NONE;
-		updates[2][0] = ito;
-		updates[2][1] = jfrom;
 	} else if (hints & HINT_SET_EN_PASSANT_FIELD) {
 		fep[0] = ifrom;
 		fep[1] = (jfrom + jto) / 2;
@@ -426,7 +409,7 @@ static int exec_ply(sqid ifrom, sqid jfrom, sqid ito, sqid jto, int hints, piece
 	/* add ply to list */
 	if (pliesnum == pliessize) {
 		pliessize += PLIES_BUFSIZE;
-		plyinfo_t *p = realloc(plies, pliessize * sizeof(*p));
+		ply_t *p = realloc(plies, pliessize * sizeof(*p));
 		if (!p)
 			return -1;
 		plies = p;
@@ -439,14 +422,13 @@ static void undo_last_ply()
 {
 	assert(pliesnum > 0);
 
-	plyinfo_t ply = plies[pliesnum - 1];
+	ply_t ply = plies[pliesnum - 1];
 	sqid ifrom = ply.from[0];
 	sqid jfrom = ply.from[1];
 	sqid ito = ply.to[0];
 	sqid jto = ply.to[1];
 	color_t c = position[ito][jto] & COLORMASK;
 
-	memset(updates, 0xff, sizeof(updates));
 	memcpy(fep, ply.fep, sizeof(fep));
 
 	/* remove ply from list */
@@ -462,37 +444,22 @@ static void undo_last_ply()
 	if (ply.hints & HINT_CASTLE) {
 		if (ito > ifrom) {
 			position[NF - 1][jfrom] = position[NF - 3][jfrom];
-			updates[3][0] = NF - 1;
-			updates[3][1] = jfrom;
-
 			position[NF - 3][jfrom] = PIECE_NONE;
-			updates[2][0] = NF - 3;
-			updates[2][1] = jfrom;
-
 		} else {
 			position[0][jfrom] = position[3][jfrom];
-			updates[3][0] = 0;
-			updates[3][1] = jfrom;
-
 			position[3][jfrom] = PIECE_NONE;
-			updates[2][0] = 3;
-			updates[2][1] = jfrom;
 		}
 	} else if (ply.hints & HINT_EN_PASSANT) {
 		position[ito][jfrom] = ply.taken | OPP_COLOR(active_color);
-		updates[2][0] = jto;
-		updates[2][1] = jfrom;
 	} else if (ply.hints & HINT_PROMOTION) {
 		position[ito][jto] = (position[ito][jto] & COLORMASK) | PIECE_PAWN;
 	}
 
 	/* undo bare ply */
 	position[ifrom][jfrom] = position[ito][jto];
-	memcpy(updates[1], ply.from, sizeof(updates[1]));
 
 	position[ito][jto] = (ply.hints & HINT_EN_PASSANT) ?
 		PIECE_NONE : (ply.taken | OPP_COLOR(active_color));
-	memcpy(updates[1], ply.to, sizeof(updates[0]));
 }
 
 static int piece_has_legal_ply(sqid ipiece, sqid jpiece)
@@ -511,7 +478,7 @@ static int piece_has_legal_ply(sqid ipiece, sqid jpiece)
 			if (!is_pseudolegal_ply(p, ipiece, jpiece, i, j, &hints))
 				continue;
 
-			plyinfo_t m;
+			ply_t m;
 			exec_ply(ipiece, jpiece, i, j, hints, 0);
 
 			int check;
@@ -606,6 +573,10 @@ color_t game_get_color(sqid i, sqid j)
 squareinfo_t game_get_squareinfo(sqid i, sqid j)
 {
 	return position[i][j];
+}
+unsigned int game_get_ply_number(void)
+{
+	return pliesnum;
 }
 int game_get_move_number(void)
 {
@@ -760,9 +731,44 @@ void game_get_status(status_t *externstatus)
 	/* just moving */
 	*externstatus = active_color ? STATUS_MOVING_BLACK : STATUS_MOVING_WHITE;
 }
-void game_get_updates(sqid u[][2])
+size_t game_get_updates(unsigned int nply, sqid squares[][2], int alsoindirect)
 {
-	memcpy(u, updates, 2 * NUM_UPDATES_MAX * sizeof(sqid));
+	assert(nply < pliesnum);
+
+	size_t size = 2 * sizeof(squares[0]);
+	if (alsoindirect)
+		size = 4 * sizeof(squares[0]);
+	memset(squares, 0xff, size);
+
+	ply_t ply = plies[nply];
+	memcpy(squares[0], ply.from, sizeof(squares[0]));
+	memcpy(squares[1], ply.to, sizeof(squares[1]));
+	size_t nupdates = 2;
+
+	if (alsoindirect) {
+		if (ply.hints & HINT_CASTLE) {
+			if (ply.to[0] > ply.from[0]) {
+				squares[2][0] = NF - 3;
+				squares[2][1] = ply.from[1];
+
+				squares[3][0] = NF - 1;
+				squares[3][1] = ply.from[1];
+			} else {
+				squares[2][0] = 3;
+				squares[2][1] = ply.from[1];
+
+				squares[3][0] = 0;
+				squares[3][1] = ply.from[1];
+			}
+			nupdates += 2;
+		} else if (ply.hints & HINT_EN_PASSANT) {
+			squares[2][0] = ply.to[0];
+			squares[2][1] = ply.from[1];
+			nupdates += 1;
+		}
+	}
+
+	return nupdates;
 }
 
 int game_load_fen(const char *s)

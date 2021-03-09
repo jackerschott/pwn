@@ -77,6 +77,7 @@ int hrecv(int fd, char *buf, size_t size)
 		//	b = buf + sz;
 		//}
 	}
+	printf("[received] %s\n", b);
 	return -3;
 }
 int hsend(int fd, char *buf)

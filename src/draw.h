@@ -19,15 +19,21 @@
 #ifndef DRAW_H
 #define DRAW_H
 
-#define PALETTE_LIGHT 	0
-#define PALETTE_DARK 	1
+#include "pwn.h"
 
-#define FIGURE_KING 	0
-#define FIGURE_QUEEN 	1
-#define FIGURE_ROOK 	2
-#define FIGURE_BISHOP 	3
-#define FIGURE_KNIGHT 	4
-#define FIGURE_PAWN 	5
+enum shade_t {
+	SHADE_LIGHT = 0,
+	SHADE_DARK = 1,
+};
+
+enum square_highlight_t {
+	SQUARE_HIGHLIGHT_UNSELECTED = 0,
+	SQUARE_HIGHLIGHT_SELECTED = 1,
+	SQUARE_HIGHLIGHT_MOVE_INVOLVED = 2,
+};
+
+typedef enum shade_t shade_t;
+typedef enum square_highlight_t square_highlight_t;
 
 #include <cairo/cairo-xlib.h>
 
@@ -38,7 +44,7 @@ void draw_record();
 void draw_commit();
 
 void draw_clear();
-void draw_square(double x, double y, double size, int palette, int selected);
-void draw_piece(double x, double y, double size, int figure, int palette);
+void draw_square(double x, double y, double size, shade_t shade, square_highlight_t highlight);
+void draw_piece(double x, double y, double size, piece_t piece, shade_t shade);
 
 #endif /* DRAW_H */

@@ -78,6 +78,8 @@
 		+ TINTERVAL_COARSE_MAXLEN 			\
 		+ STATMSG_TEXTS_MAXLEN)
 
+#define TIME_STATUS_UPDATE_INTERVAL SECOND
+
 #define TIMEOUTDIFF_MAX (SECOND / 10)
 
 /* maximal difference between measured game starts by server and client */
@@ -99,7 +101,7 @@ struct gameinfo_t {
 	struct timeinfo_t tiopp;
 };
 struct gameinfo_t ginfo;
-long nupdates;
+long time_status_updates_num;
 
 static sqid selsquare[2];
 static struct {
@@ -109,6 +111,7 @@ static struct {
 	double size;
 	double squaresize;
 } board;
+static sqid moveupdates[UPDATES_NUM_MAX + 2][2];
 
 static Display *dpy;
 static Window winmain;
@@ -553,7 +556,7 @@ static int move(sqid from[2], sqid to[2], piece_t *piece, piece_t *prompiece)
 
 	return 0;
 }
-static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
+static int apply_move(sqid f[2])
 {
 	piece_t piece, prompiece;
 	int err = move(selsquare, f, &piece, &prompiece);
@@ -584,9 +587,12 @@ static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 		pthread_exit(NULL);
 	}
 
-	/* show move */
+	/* get updates */
 	pthread_mutex_lock(&hctx->gamelock);
-	game_get_updates(updates);
+	size_t nlastply = game_get_ply_number() - 1;
+	size_t nupdates = game_get_updates(nlastply, moveupdates, 1);
+	if (nlastply > 0)
+		game_get_updates(nlastply - 1, moveupdates + nupdates, 0);
 	pthread_mutex_unlock(&hctx->gamelock);
 
 	/* let time run only after the first move by white */
@@ -645,7 +651,7 @@ static int apply_move(sqid f[2], sqid updates[NUM_UPDATES_MAX][2])
 	ginfo.tiopp.movestart = ginfo.tiself.movestart + tmove;
 	show_status(ginfo);
 
-	nupdates = 0;
+	time_status_updates_num = 0;
 	return 0;
 }
 
@@ -657,8 +663,10 @@ static void selectf(sqid f[2])
 
 	double fx = ITOX(f[0], board.xorig, board.squaresize, ginfo.selfcolor);
 	double fy = JTOY(f[1], board.yorig, board.squaresize, ginfo.selfcolor);
+
+	shade_t shade = (shade_t)(1 - (f[0] + f[1]) % 2);
 	pthread_mutex_lock(&hctx->xlock);
-	draw_square(fx, fy, board.squaresize, 1 - (f[0] + f[1]) % 2, 1);
+	draw_square(fx, fy, board.squaresize, shade, SQUARE_HIGHLIGHT_SELECTED);
 	pthread_mutex_unlock(&hctx->xlock);
 
 	pthread_mutex_lock(&hctx->gamelock);
@@ -670,7 +678,7 @@ static void selectf(sqid f[2])
 		pthread_mutex_unlock(&hctx->gamelock);
 
 		pthread_mutex_lock(&hctx->xlock);
-		draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
+		draw_piece(fx, fy, board.squaresize, piece, (shade_t)color);
 		pthread_mutex_unlock(&hctx->xlock);
 	}
 
@@ -688,8 +696,10 @@ static void unselectf(void)
 
 	double fx = ITOX(selsquare[0], board.xorig, board.squaresize, ginfo.selfcolor);
 	double fy = JTOY(selsquare[1], board.yorig, board.squaresize, ginfo.selfcolor);
+	
+	shade_t shade = (shade_t)(1 - (selsquare[0] + selsquare[1]) % 2);
 	pthread_mutex_lock(&hctx->xlock);
-	draw_square(fx, fy, board.squaresize, 1 - (selsquare[0] + selsquare[1]) % 2, 0);
+	draw_square(fx, fy, board.squaresize, shade, SQUARE_HIGHLIGHT_UNSELECTED);
 	pthread_mutex_unlock(&hctx->xlock);
 
 	pthread_mutex_lock(&hctx->gamelock);
@@ -701,7 +711,7 @@ static void unselectf(void)
 		pthread_mutex_unlock(&hctx->gamelock);
 
 		pthread_mutex_lock(&hctx->xlock);
-		draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
+		draw_piece(fx, fy, board.squaresize, piece, (shade_t)color);
 		pthread_mutex_unlock(&hctx->xlock);
 	}
 
@@ -711,33 +721,40 @@ static void unselectf(void)
 
 	memset(selsquare, 0xff, 2 * sizeof(sqid));
 }
-static void show(sqid updates[][2])
+static void show()
 {
 	double fx, fy;
 
 	pthread_mutex_lock(&hctx->xlock);
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
-	for (int k = 0; k < NUM_UPDATES_MAX && updates[k][0] != -1; ++k) {
-		int i = updates[k][0];
-		int j = updates[k][1];
+	for (int k = UPDATES_NUM_MAX - 1; k >= 0; --k) {
+		if (moveupdates[k][0] == -1)
+			continue;
+
+		int i = moveupdates[k][0];
+		int j = moveupdates[k][1];
 
 		double fx = ITOX(i, board.xorig, board.squaresize, ginfo.selfcolor);
 		double fy = JTOY(j, board.yorig, board.squaresize, ginfo.selfcolor);
+
+		shade_t shade = (shade_t)(1 - (i + j) % 2);
+		square_highlight_t hl = k > 1 ?
+			SQUARE_HIGHLIGHT_UNSELECTED : SQUARE_HIGHLIGHT_MOVE_INVOLVED;
 		pthread_mutex_lock(&hctx->xlock);
-		draw_square(fx, fy, board.squaresize, 1 - (i + j) % 2, 0);
+		draw_square(fx, fy, board.squaresize, shade, hl);
 		pthread_mutex_unlock(&hctx->xlock);
 
 		pthread_mutex_lock(&hctx->gamelock);
-		int piece = game_get_piece(i, j);
+		piece_t piece = game_get_piece(i, j);
 		pthread_mutex_unlock(&hctx->gamelock);
-		if (piece & PIECEMASK) {
+		if (piece) {
 			pthread_mutex_lock(&hctx->gamelock);
 			int color = game_get_color(i, j);
 			pthread_mutex_unlock(&hctx->gamelock);
 
 			pthread_mutex_lock(&hctx->xlock);
-			draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
+			draw_piece(fx, fy, board.squaresize, piece, (shade_t)color);
 			pthread_mutex_unlock(&hctx->xlock);
 		}
 	}
@@ -773,21 +790,29 @@ static void redraw(int width, int height)
 		for (int i = 0; i < NF; ++i) {
 			double fx = ITOX(i, board.xorig, board.squaresize, ginfo.selfcolor);
 			double fy = JTOY(j, board.yorig, board.squaresize, ginfo.selfcolor);
-			int sel = i == selsquare[0] && j == selsquare[1];
+
+			shade_t shade = (shade_t)(1 - (i + j) % 2);
+			square_highlight_t hl = SQUARE_HIGHLIGHT_UNSELECTED;
+			if (i == selsquare[0] && j == selsquare[1]) {
+				hl = SQUARE_HIGHLIGHT_SELECTED;
+			} else if ((i == moveupdates[0][0] && j == moveupdates[0][1])
+					|| (i == moveupdates[1][0] && j == moveupdates[1][1])) {
+				hl = SQUARE_HIGHLIGHT_MOVE_INVOLVED;
+			}
 			pthread_mutex_lock(&hctx->xlock);
-			draw_square(fx, fy, board.squaresize, 1 - (i + j) % 2, sel);
+			draw_square(fx, fy, board.squaresize, shade, hl);
 			pthread_mutex_unlock(&hctx->xlock);
 
 			pthread_mutex_lock(&hctx->gamelock);
-			int piece = game_get_piece(i, j);
+			piece_t piece = game_get_piece(i, j);
 			pthread_mutex_unlock(&hctx->gamelock);
-			if (piece & PIECEMASK) {
+			if (piece) {
 				pthread_mutex_lock(&hctx->gamelock);
 				int color = game_get_color(i, j);
 				pthread_mutex_unlock(&hctx->gamelock);
 
 				pthread_mutex_lock(&hctx->xlock);
-				draw_piece(fx, fy, board.squaresize, FIGURE(piece), PALETTE(color));
+				draw_piece(fx, fy, board.squaresize, piece, (shade_t)color);
 				pthread_mutex_unlock(&hctx->xlock);
 			}
 		}
@@ -876,12 +901,11 @@ static void handle_touch(struct gfxh_event_touch *e)
 				selectf(f);
 		}
 	} else if (selsquare[0] != -1) {
-		sqid updates[NUM_UPDATES_MAX][2];
-		int err = apply_move(f, updates);
+		int err = apply_move(f);
 		unselectf();
 		if (err == 1)
 			return;
-		show(updates);
+		show();
 	}
 }
 static void handle_playmove(struct gfxh_event_playmove *e)
@@ -907,10 +931,12 @@ static void handle_playmove(struct gfxh_event_playmove *e)
 	}
 
 	pthread_mutex_lock(&hctx->gamelock);
-	sqid updates[NUM_UPDATES_MAX][2];
-	game_get_updates(updates);
+	size_t nlastply = game_get_ply_number() - 1;
+	size_t nupdates = game_get_updates(nlastply, moveupdates, 1);
+	if (nlastply > 0)
+		game_get_updates(nlastply - 1, moveupdates + nupdates, 0);
 	pthread_mutex_unlock(&hctx->gamelock);
-	show(updates);
+	show();
 
 	/* let time run only after the first move by white */
 	long deduction = e->tmove;
@@ -933,7 +959,7 @@ static void handle_playmove(struct gfxh_event_playmove *e)
 	ginfo.status = status;
 	show_status(ginfo);
 
-	nupdates = 0;
+	time_status_updates_num = 0;
 }
 static void handle_statuschange(struct gfxh_event_statuschange *e)
 {
@@ -1035,9 +1061,9 @@ static void handle_updatetime(void)
 
 		ginfo.status = status;
 		show_status(ginfo);
-	} else if (movetime >= nupdates * SECOND) {
+	} else if (movetime >= time_status_updates_num * TIME_STATUS_UPDATE_INTERVAL) {
 		show_status(ginfo);
-		++nupdates;
+		++time_status_updates_num;
 	}
 }
 
@@ -1060,6 +1086,7 @@ static void gfxh_setup(void)
 
 	selsquare[0] = -1;
 	selsquare[1] = -1;
+	memset(moveupdates, 0xff, sizeof(moveupdates));
 
 	pthread_mutex_lock(&hctx->xlock);
 	XWindowAttributes wa;
@@ -1098,7 +1125,7 @@ static void gfxh_setup(void)
 
 	ginfo.status = STATUS_MOVING_WHITE;
 	show_status(ginfo);
-	nupdates = -1;
+	time_status_updates_num = -1;
 	return;
 
 cleanup_err:

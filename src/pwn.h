@@ -122,7 +122,7 @@ const static char *statmsg_names[] = {
 	"surrenderwhite",
 	"surrenderblack",
 };
-#define STATMSG_TEXTS_MAXLEN 49
+#define STATMSG_TEXTS_MAXLEN 40
 const static char *statmsg_texts[] = {
 	"It is White to move",
 	"It is Black to move",

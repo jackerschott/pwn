@@ -21,11 +21,11 @@
 
 #include "pwn.h"
 
-#define NUM_UPDATES_MAX 4
+#define UPDATES_NUM_MAX 4
 
 #define STARTPOS_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
-typedef struct plyinfo_t plyinfo_t;
+typedef struct ply_t ply_t;
 
 int game_init(const char *fen);
 void game_terminate(void);
@@ -41,7 +41,8 @@ color_t game_get_active_color(void);
 piece_t game_get_piece(sqid i, sqid j);
 color_t game_get_color(sqid i, sqid j);
 squareinfo_t game_get_squareinfo(sqid i, sqid j);
-void game_get_updates(sqid u[][2]);
+unsigned int game_get_ply_number(void);
+size_t game_get_updates(unsigned int nply, sqid squares[][2], int alsoindirect);
 int game_get_move_number();
 
 int game_load_fen(const char *s);

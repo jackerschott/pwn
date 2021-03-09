@@ -16,55 +16,57 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <assert.h>
 #include <math.h>
-#include "pwn.h"
+
 #include "draw.h"
 
-#define COLOR(r, g, b, a) ((color){ (r) / ((double)0xff), (g) / ((double)0xff), (b) / ((double)0xff), (a) / ((double)0xff) })
+#define COLOR(r, g, b, a) ((color){ \
+		(r) / ((double)0xff), \
+		(g) / ((double)0xff), \
+		(b) / ((double)0xff), \
+		(a) / ((double)0xff) })
 
-#define PIECE_COLOR_FILL 	0
-#define PIECE_COLOR_STROKE 	1
-#define PIECE_COLOR_OUTLINE 	2
-
-#define FIELD_COLOR_DEFAULT 	0
-#define FIELD_COLOR_SELECTED 	1
+enum {
+	PIECE_COLOR_FILL = 0,
+	PIECE_COLOR_STROKE = 1,
+	PIECE_COLOR_OUTLINE = 2,
+};
 
 typedef struct {
 	double r, g, b, a;
 } color;
 
-color palette_light_piece[] = {
+color light_piece_palette[] = {
 	COLOR(0xff, 0xff, 0xff, 0xff),
 	COLOR(0x00, 0x00, 0x00, 0xff),
 	COLOR(0x00, 0x00, 0x00, 0xff),
 };
-color palette_dark_piece[] = {
+color dark_piece_palette[] = {
 	COLOR(0x00, 0x00, 0x00, 0xff),
 	COLOR(0xff, 0xff, 0xff, 0xff),
 	COLOR(0x00, 0x00, 0x00, 0xff),
 };
-color palette_light_square[] = {
-	COLOR(0xf0, 0xd9, 0xb5, 0xff),
-	COLOR(0x80, 0xff, 0x00, 0x80),
-};
-color palette_dark_square[] = {
-	COLOR(0xb5, 0x88, 0x63, 0xff),
-	COLOR(0x80, 0xff, 0x00, 0x80),
-};
+
+color light_square_color = COLOR(0xf0, 0xd9, 0xb5, 0xff);
+color dark_square_color = COLOR(0xb5, 0x88, 0x63, 0xff);
+
+color selection_overlay_color = COLOR(0x27, 0x44, 0x70, 0xe6);
+color move_involved_overlay_color = COLOR(0x27, 0x44, 0x70, 0x99);
 
 cairo_t *cr;
 
-static void draw_king(double x, double y, double size, int palette)
+static void draw_king(double x, double y, double size, shade_t shade)
 {
 	color f, s, o;
-	if (palette == PALETTE_LIGHT) {
-		f = palette_light_piece[PIECE_COLOR_FILL];
-		s = palette_light_piece[PIECE_COLOR_STROKE];
-		o = palette_light_piece[PIECE_COLOR_OUTLINE];
+	if (shade == SHADE_LIGHT) {
+		f = light_piece_palette[PIECE_COLOR_FILL];
+		s = light_piece_palette[PIECE_COLOR_STROKE];
+		o = light_piece_palette[PIECE_COLOR_OUTLINE];
 	} else {
-		f = palette_dark_piece[PIECE_COLOR_FILL];
-		s = palette_dark_piece[PIECE_COLOR_STROKE];
-		o = palette_dark_piece[PIECE_COLOR_OUTLINE];
+		f = dark_piece_palette[PIECE_COLOR_FILL];
+		s = dark_piece_palette[PIECE_COLOR_STROKE];
+		o = dark_piece_palette[PIECE_COLOR_OUTLINE];
 	}
 	cairo_pattern_t *fill = cairo_pattern_create_rgba(f.r, f.g, f.b, f.a);
 	cairo_pattern_t *stroke = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);
@@ -128,7 +130,7 @@ static void draw_king(double x, double y, double size, int palette)
 	cairo_set_source(cr, stroke);
 	cairo_stroke(cr);
 
-	if (palette == PALETTE_DARK) {
+	if (shade == SHADE_DARK) {
 		cairo_move_to(cr, 32, 29.5);
 		cairo_curve_to(cr, 32, 29.5, 40.5, 25.5, 38.03, 19.85);
 		cairo_curve_to(cr, 34.15, 14, 25, 18, 22.5, 24.5);
@@ -148,17 +150,17 @@ static void draw_king(double x, double y, double size, int palette)
 	cairo_pattern_destroy(stroke);
 	cairo_pattern_destroy(fill);
 }
-static void draw_queen(double x, double y, double size, int palette)
+static void draw_queen(double x, double y, double size, shade_t shade)
 {
 	color f, s, o;
-	if (palette == PALETTE_LIGHT) {
-		f = palette_light_piece[PIECE_COLOR_FILL];
-		s = palette_light_piece[PIECE_COLOR_STROKE];
-		o = palette_light_piece[PIECE_COLOR_OUTLINE];
+	if (shade == SHADE_LIGHT) {
+		f = light_piece_palette[PIECE_COLOR_FILL];
+		s = light_piece_palette[PIECE_COLOR_STROKE];
+		o = light_piece_palette[PIECE_COLOR_OUTLINE];
 	} else {
-		f = palette_dark_piece[PIECE_COLOR_FILL];
-		s = palette_dark_piece[PIECE_COLOR_STROKE];
-		o = palette_dark_piece[PIECE_COLOR_OUTLINE];
+		f = dark_piece_palette[PIECE_COLOR_FILL];
+		s = dark_piece_palette[PIECE_COLOR_STROKE];
+		o = dark_piece_palette[PIECE_COLOR_OUTLINE];
 	}
 	cairo_pattern_t *fill = cairo_pattern_create_rgba(f.r, f.g, f.b, f.a);
 	cairo_pattern_t *stroke = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);
@@ -225,7 +227,7 @@ static void draw_queen(double x, double y, double size, int palette)
 	cairo_curve_to(cr, 12.5, 31.5, 12.5, 31, 12, 33.5);
 	cairo_curve_to(cr, 10.5, 34.5, 10.5, 36, 10.5, 36);
 	cairo_curve_to(cr, 9, 37.5, 11, 38.5, 11, 38.5);
-	if (palette == PALETTE_LIGHT) {
+	if (shade == SHADE_LIGHT) {
 		cairo_curve_to(cr, 17.5, 39.5, 27.5, 39.5, 34, 38.5);
 	} else {
 		cairo_curve_to(cr, 17.5, 41.0, 27.5, 41.0, 34, 38.5);
@@ -241,7 +243,7 @@ static void draw_queen(double x, double y, double size, int palette)
 	cairo_set_source(cr, outline);
 	cairo_stroke(cr);
 
-	if (palette == PALETTE_LIGHT) {
+	if (shade == SHADE_LIGHT) {
 		cairo_move_to(cr, 11.5, 30);
 		cairo_curve_to(cr, 15, 29, 30, 29, 33.5, 30);
 		cairo_set_source(cr, stroke);
@@ -281,17 +283,17 @@ static void draw_queen(double x, double y, double size, int palette)
 	cairo_pattern_destroy(stroke);
 	cairo_pattern_destroy(fill);
 }
-static void draw_rook(double x, double y, double size, int palette)
+static void draw_rook(double x, double y, double size, shade_t shade)
 {
 	color f, s, o;
-	if (palette == PALETTE_LIGHT) {
-		f = palette_light_piece[PIECE_COLOR_FILL];
-		s = palette_light_piece[PIECE_COLOR_STROKE];
-		o = palette_light_piece[PIECE_COLOR_OUTLINE];
+	if (shade == SHADE_LIGHT) {
+		f = light_piece_palette[PIECE_COLOR_FILL];
+		s = light_piece_palette[PIECE_COLOR_STROKE];
+		o = light_piece_palette[PIECE_COLOR_OUTLINE];
 	} else {
-		f = palette_dark_piece[PIECE_COLOR_FILL];
-		s = palette_dark_piece[PIECE_COLOR_STROKE];
-		o = palette_dark_piece[PIECE_COLOR_OUTLINE];
+		f = dark_piece_palette[PIECE_COLOR_FILL];
+		s = dark_piece_palette[PIECE_COLOR_STROKE];
+		o = dark_piece_palette[PIECE_COLOR_OUTLINE];
 	}
 	cairo_pattern_t *fill = cairo_pattern_create_rgba(f.r, f.g, f.b, f.a);
 	cairo_pattern_t *stroke = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);
@@ -369,7 +371,7 @@ static void draw_rook(double x, double y, double size, int palette)
 	cairo_set_source(cr, outline);
 	cairo_stroke(cr);
 
-	if (palette == PALETTE_DARK) {
+	if (shade == SHADE_DARK) {
 		cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 
 		cairo_move_to(cr, 12.0, 35.5);
@@ -407,17 +409,17 @@ static void draw_rook(double x, double y, double size, int palette)
 	cairo_pattern_destroy(stroke);
 	cairo_pattern_destroy(fill);
 }
-static void draw_bishop(double x, double y, double size, int palette)
+static void draw_bishop(double x, double y, double size, shade_t shade)
 {
 	color f, s, o;
-	if (palette == PALETTE_LIGHT) {
-		f = palette_light_piece[PIECE_COLOR_FILL];
-		s = palette_light_piece[PIECE_COLOR_STROKE];
-		o = palette_light_piece[PIECE_COLOR_OUTLINE];
+	if (shade == SHADE_LIGHT) {
+		f = light_piece_palette[PIECE_COLOR_FILL];
+		s = light_piece_palette[PIECE_COLOR_STROKE];
+		o = light_piece_palette[PIECE_COLOR_OUTLINE];
 	} else {
-		f = palette_dark_piece[PIECE_COLOR_FILL];
-		s = palette_dark_piece[PIECE_COLOR_STROKE];
-		o = palette_dark_piece[PIECE_COLOR_OUTLINE];
+		f = dark_piece_palette[PIECE_COLOR_FILL];
+		s = dark_piece_palette[PIECE_COLOR_STROKE];
+		o = dark_piece_palette[PIECE_COLOR_OUTLINE];
 	}
 	cairo_pattern_t *fill = cairo_pattern_create_rgba(f.r, f.g, f.b, f.a);
 	cairo_pattern_t *stroke = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);
@@ -488,17 +490,17 @@ static void draw_bishop(double x, double y, double size, int palette)
 	cairo_pattern_destroy(stroke);
 	cairo_pattern_destroy(fill);
 }
-static void draw_knight(double x, double y, double size, int palette)
+static void draw_knight(double x, double y, double size, shade_t shade)
 {
 	color f, s, o;
-	if (palette == PALETTE_LIGHT) {
-		f = palette_light_piece[PIECE_COLOR_FILL];
-		s = palette_light_piece[PIECE_COLOR_STROKE];
-		o = palette_light_piece[PIECE_COLOR_OUTLINE];
+	if (shade == SHADE_LIGHT) {
+		f = light_piece_palette[PIECE_COLOR_FILL];
+		s = light_piece_palette[PIECE_COLOR_STROKE];
+		o = light_piece_palette[PIECE_COLOR_OUTLINE];
 	} else {
-		f = palette_dark_piece[PIECE_COLOR_FILL];
-		s = palette_dark_piece[PIECE_COLOR_STROKE];
-		o = palette_dark_piece[PIECE_COLOR_OUTLINE];
+		f = dark_piece_palette[PIECE_COLOR_FILL];
+		s = dark_piece_palette[PIECE_COLOR_STROKE];
+		o = dark_piece_palette[PIECE_COLOR_OUTLINE];
 	}
 	cairo_pattern_t *fill = cairo_pattern_create_rgba(f.r, f.g, f.b, f.a);
 	cairo_pattern_t *stroke = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);
@@ -544,7 +546,7 @@ static void draw_knight(double x, double y, double size, int palette)
 	cairo_set_source(cr, stroke);
 	cairo_stroke(cr);
 
-	if (palette == PALETTE_DARK) {
+	if (shade == SHADE_DARK) {
 		cairo_move_to(cr, 24.55, 10.4);
 		cairo_line_to(cr, 24.1, 11.85);
 		cairo_line_to(cr, 24.6, 12.0);
@@ -575,15 +577,15 @@ static void draw_knight(double x, double y, double size, int palette)
 	cairo_pattern_destroy(stroke);
 	cairo_pattern_destroy(fill);
 }
-static void draw_pawn(double x, double y, double size, int palette)
+static void draw_pawn(double x, double y, double size, shade_t shade)
 {
 	color f, o;
-	if (palette == PALETTE_LIGHT) {
-		f = palette_light_piece[PIECE_COLOR_FILL];
-		o = palette_light_piece[PIECE_COLOR_OUTLINE];
+	if (shade == SHADE_LIGHT) {
+		f = light_piece_palette[PIECE_COLOR_FILL];
+		o = light_piece_palette[PIECE_COLOR_OUTLINE];
 	} else {
-		f = palette_dark_piece[PIECE_COLOR_FILL];
-		o = palette_dark_piece[PIECE_COLOR_OUTLINE];
+		f = dark_piece_palette[PIECE_COLOR_FILL];
+		o = dark_piece_palette[PIECE_COLOR_OUTLINE];
 	}
 	cairo_pattern_t *fill = cairo_pattern_create_rgba(f.r, f.g, f.b, f.a);
 	cairo_pattern_t *outline = cairo_pattern_create_rgba(o.r, o.g, o.b, o.a);
@@ -643,18 +645,14 @@ void draw_clear()
 	cairo_paint(cr);
 }
 
-void draw_square(double x, double y, double size, int palette, int selected)
+void draw_square(double x, double y, double size, shade_t shade, square_highlight_t highlight)
 {
-	color d, s;
-	if (palette == PALETTE_LIGHT) {
-		d = palette_light_square[FIELD_COLOR_DEFAULT];
-		s = palette_light_square[FIELD_COLOR_SELECTED];
-	} else {
-		d = palette_dark_square[FIELD_COLOR_DEFAULT];
-		s = palette_dark_square[FIELD_COLOR_SELECTED];
-	}
+	color d = shade == SHADE_LIGHT ? light_square_color : dark_square_color;
+	color s = selection_overlay_color;
+	color i = move_involved_overlay_color;
 	cairo_pattern_t *def = cairo_pattern_create_rgba(d.r, d.g, d.b, d.a);
 	cairo_pattern_t *sel = cairo_pattern_create_rgba(s.r, s.g, s.b, s.a);
+	cairo_pattern_t *inv = cairo_pattern_create_rgba(i.r, i.g, i.b, i.a);
 
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
 
@@ -662,39 +660,44 @@ void draw_square(double x, double y, double size, int palette, int selected)
 	cairo_rectangle(cr, x, y, size, size);
 	cairo_fill(cr);
 
-	if (selected) {
+	if (highlight == SQUARE_HIGHLIGHT_SELECTED) {
 		cairo_set_source(cr, sel);
+		cairo_rectangle(cr, x, y, size, size);
+		cairo_fill(cr);
+	} else if (highlight == SQUARE_HIGHLIGHT_MOVE_INVOLVED) {
+		cairo_set_source(cr, inv);
 		cairo_rectangle(cr, x, y, size, size);
 		cairo_fill(cr);
 	}
 
 	cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
 
-	cairo_pattern_destroy(def);
+	cairo_pattern_destroy(inv);
 	cairo_pattern_destroy(sel);
+	cairo_pattern_destroy(def);
 }
-void draw_piece(double x, double y, double size, int figure, int palette)
+void draw_piece(double x, double y, double size, piece_t piece, shade_t shade)
 {
-	switch (figure) {
-		case FIGURE_KING:
-			draw_king(x, y, size, palette);
+	switch (piece) {
+		case PIECE_KING:
+			draw_king(x, y, size, shade);
 			break;
-		case FIGURE_QUEEN:
-			draw_queen(x, y, size, palette);
+		case PIECE_QUEEN:
+			draw_queen(x, y, size, shade);
 			break;
-		case FIGURE_ROOK:
-			draw_rook(x, y, size, palette);
+		case PIECE_ROOK:
+			draw_rook(x, y, size, shade);
 			break;
-		case FIGURE_BISHOP:
-			draw_bishop(x, y, size, palette);
+		case PIECE_BISHOP:
+			draw_bishop(x, y, size, shade);
 			break;
-		case FIGURE_KNIGHT:
-			draw_knight(x, y, size, palette);
+		case PIECE_KNIGHT:
+			draw_knight(x, y, size, shade);
 			break;
-		case FIGURE_PAWN:
-			draw_pawn(x, y, size, palette);
+		case PIECE_PAWN:
+			draw_pawn(x, y, size, shade);
 			break;
 		default:
-			BUG();
+			assert(0);
 	}
 }
