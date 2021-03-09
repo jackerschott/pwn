@@ -277,7 +277,6 @@ static int parse_movemsg(const char *str, struct gfxh_event_playmove *e)
 		return 0;
 	}
 
-	const char *end;
 	if (!(c = parse_timeinterval(c, &e->tmove, 0)))
 		return 1;
 	if (*c == '\0')
@@ -417,10 +416,7 @@ static void show_status(struct gameinfo_t ginfo)
 		++c;
 	}
 
-	len = strlen(statmsg_texts[ginfo.status]);
-	strncpy(c, statmsg_texts[ginfo.status], len);
-	c += len;
-	*c = '\0';
+	strcpy(c, statmsg_texts[ginfo.status]);
 
 	pthread_mutex_lock(&hctx->xlock);
 	XStoreName(dpy, winmain, title);
@@ -680,8 +676,6 @@ static void unselectf(void)
 }
 static void show()
 {
-	double fx, fy;
-
 	pthread_mutex_lock(&hctx->xlock);
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
@@ -1277,7 +1271,6 @@ void init_communication_server(const char* node, const char *port, color_t color
 	}
 	freeaddrinfo(res);
 
-	struct sockaddr addr;
 	if (listen(fsock, 1) == -1) {
 		close(fsock);
 		exit(-1);
