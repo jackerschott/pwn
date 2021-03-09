@@ -17,12 +17,14 @@
 
 VERSION = 1.0
 
-PREFIX = /usr/local
-MANPREFIX = $(PREFIX)/share/man
+export PREFIX = /usr/local
+export MANPREFIX = $(PREFIX)/share/man
 
 export BINNAME = pwn
 export BUILDDIR = build
 TESTNAMES = notationtest gametest
+
+SOUNDNAMES = move.mp3 capture.mp3 lowtime.mp3 gamedecided.mp3
 
 $(BINNAME): $(BUILDDIR)
 	$(MAKE) -C src ROOTDIR=..
@@ -36,12 +38,14 @@ $(BUILDDIR):
 	mkdir -p $@
 
 clean:
-	rm -rf build/
+	rm -rf $(BUILDDIR)
 
 install: $(BINNAME)
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
-	cp -f $(BIN) $(DESTDIR)$(PREFIX)/bin
+	cp -f $(BUILDDIR)/$(BINNAME) $(DESTDIR)$(PREFIX)/bin
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/$(BINNAME)
+	mkdir -p $(DESTDIR)$(PREFIX)/share/sounds
+	cp -f $(addprefix sounds/,$(SOUNDNAMES)) $(DESTDIR)$(PREFIX)/share/sounds
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
 	sed "s/VERSION/$(VERSION)/g" < $(BINNAME).1 > $(DESTDIR)$(MANPREFIX)/man1/$(BINNAME).1
 	chmod 644 $(DESTDIR)$(MANPREFIX)/man1/$(BINNAME).1
@@ -49,5 +53,13 @@ install: $(BINNAME)
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(BINNAME)
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/$(BINNAME).1
+	rm -f $(addprefix $(DESTDIR)$(PREFIX)/share/sounds/,$(SOUNDNAMES))
+
+dist:
+	mkdir -p pwn-$(VERSION)
+	cp -R LICENSE Makefile pwn.1 sounds src test pwn-$(VERSION)
+	tar -czf pwn-$(VERSION).tar.gz pwn-$(VERSION)
+	rm -rf pwn-$(VERSION)
+
 
 .PHONY: $(SUBDIRS) clean install uninstall
