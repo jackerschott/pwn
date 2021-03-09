@@ -42,8 +42,15 @@
 
 #include "gfxh.h"
 
-#define FIGURE(p) ((p) / 2 - 1)
-#define PALETTE(c) (c)
+int fopp;
+
+static struct handler_context_t *hctx;
+static int fevent;
+static int fconfirm;
+static int *state;
+static struct pollfd pfds[2];
+
+/* graphics handling */
 #define XTOI(x, xorig, squaresize, c) \
 	((1 - (c)) * (int)(((x) - xorig) / squaresize) \
 	+ (c) * (NF - (int)(((x) - xorig) / squaresize) - 1))
@@ -55,6 +62,24 @@
 #define JTOY(j, yorig, squaresize, c) \
 	(yorig + ((1 - (c)) * (NF - (j) - 1) + (c) * (j)) * squaresize)
 
+#define MOVEUPDATES_SIZE (UPDATES_NUM_MAX + 2)
+
+static sqid selsquare[2];
+static struct {
+	cairo_surface_t *surface;
+	double xorig;
+	double yorig;
+	double size;
+	double squaresize;
+} board;
+static sqid moveupdates[MOVEUPDATES_SIZE][2];
+
+static Display *dpy;
+static Window winmain;
+static Visual *vis;
+static Atom atoms[ATOM_COUNT];
+
+/* network communication */
 #define INITMSG_PREFIX "init"
 #define MOVEMSG_PREFIX "move"
 #define STATMSG_PREFIX "status"
@@ -78,14 +103,12 @@
 		+ TINTERVAL_COARSE_MAXLEN 			\
 		+ STATMSG_TEXTS_MAXLEN)
 
+/* time and game status management */
 #define TIME_STATUS_UPDATE_INTERVAL SECOND
-
-#define TIMEOUTDIFF_MAX (SECOND / 10)
-
-/* maximal difference between measured game starts by server and client */
-#define TRANSDIFF_MAX SECOND
-
-int fopp;
+#define TIMEOUTDIFF_MAX (SECOND / 20) /* maximal difference between gametime
+					 for one color measured by both parties */
+#define TRANSDIFF_MAX SECOND /* maximal difference between measured
+				game starts by server and client */
 
 struct timeinfo_t {
 	long movestart;
@@ -103,63 +126,40 @@ struct gameinfo_t {
 struct gameinfo_t ginfo;
 long time_status_updates_num;
 
-static sqid selsquare[2];
-static struct {
-	cairo_surface_t *surface;
-	double xorig;
-	double yorig;
-	double size;
-	double squaresize;
-} board;
-static sqid moveupdates[UPDATES_NUM_MAX + 2][2];
-
-static Display *dpy;
-static Window winmain;
-static Visual *vis;
-static Atom atoms[ATOM_COUNT];
-
-static struct handler_context_t *hctx;
-static int fevent;
-static int fconfirm;
-static int *state;
-static struct pollfd pfds[2];
-
 static void gfxh_cleanup(void);
 
 static void measure_game_start(long *treal, long *tmono)
 {
-	/* measure game start in real and monotonic time */
 	struct timespec tsr, tsm;
 	clock_gettime(CLOCK_REALTIME, &tsr);
 	clock_gettime(CLOCK_MONOTONIC, &tsm);
 
 	*treal = tsr.tv_sec * SECOND + tsr.tv_nsec;
-	/* correct for delay between tsr and tsm measurement */
-	*tmono = tsm.tv_sec * SECOND + tsm.tv_nsec - tsr.tv_nsec;
+	*tmono = tsm.tv_sec * SECOND + tsm.tv_nsec;
 }
-static int get_game_start_mono(long tstart, long *tstartmono)
+static int get_game_start_mono(long treal, long *tmono)
 {
-	struct timespec tsreal, tsmono;
-	clock_gettime(CLOCK_REALTIME, &tsreal);
-	clock_gettime(CLOCK_MONOTONIC, &tsmono);
+	struct timespec tsr, tsm;
+	clock_gettime(CLOCK_REALTIME, &tsr);
+	clock_gettime(CLOCK_MONOTONIC, &tsm);
 
-	long tmono = tsmono.tv_sec * SECOND + tsmono.tv_nsec;
-	long treal = tsreal.tv_sec * SECOND + tsreal.tv_nsec;
+	long tm = tsm.tv_sec * SECOND + tsm.tv_nsec;
+	long tr = tsr.tv_sec * SECOND + tsr.tv_nsec;
 
-	long transdiff = treal - tstart;
+	long transdiff = tr - treal;
 	if (transdiff > TRANSDIFF_MAX)
 		return 1;
 
-	*tstartmono = tmono - transdiff;
+	*tmono = tm - transdiff;
 	return 0;
 }
-static long measure_move_time(long tstart)
+static long measure_move_time(long tmovestart)
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	long t = ts.tv_sec * SECOND + ts.tv_nsec;
 
-	return t - tstart;
+	return t - tmovestart;
 }
 static long measure_timestamp()
 {
@@ -519,72 +519,49 @@ static int prompt_promotion_piece(piece_t *p)
 	*p = PIECE_BY_IDX(i);
 	return 0;
 }
-static int move(sqid from[2], sqid to[2], piece_t *piece, piece_t *prompiece)
+static int apply_move(sqid from[2], sqid to[2], piece_t *piece, piece_t *prompiece,
+		long tmove, int oppmove)
 {
-	*prompiece = PIECE_NONE;
-
+	/* let time run only after the first move by white */
+	long deduction = tmove;
 	pthread_mutex_lock(&hctx->gamelock);
-	piece_t p = game_get_piece(from[0], from[1]);
+	int nmove = game_get_move_number();
 	pthread_mutex_unlock(&hctx->gamelock);
-	*piece = p;
+	if (nmove == 0 && ginfo.status == STATUS_MOVING_WHITE) {
+		deduction = 0;
+	}
 
+	/* get piece */
+	if (piece) {
+		pthread_mutex_lock(&hctx->gamelock);
+		piece_t p = game_get_piece(from[0], from[1]);
+		pthread_mutex_unlock(&hctx->gamelock);
+		*piece = p;
+	}
+
+	/* apply move */
 	pthread_mutex_lock(&hctx->gamelock);
-	int ret = game_exec_ply(from[0], from[1], to[0], to[1], 0);
+	int ret = game_exec_ply(from[0], from[1], to[0], to[1], *prompiece);
 	pthread_mutex_unlock(&hctx->gamelock);
-	if (ret == -1 || ret == 1) {
-		return ret;
-	} else if (ret == 2) {
+	if (ret == 1) {
+		return 1;
+	} else if (*prompiece == PIECE_NONE && ret == 2) {
+		if (*prompiece != PIECE_NONE)
+			return 1;
+
 		ret = prompt_promotion_piece(prompiece);
-		if (ret == -1)
-			return -1;
-		if (ret == 1)
-			return 2;
+		if (ret == -1) {
+			SYSERR();
+			gfxh_cleanup();
+			pthread_exit(NULL);
+		} else if (ret == 1) {
+			return 1;
+		}
 
 		pthread_mutex_lock(&hctx->gamelock);
 		ret = game_exec_ply(from[0], from[1], to[0], to[1], *prompiece);
 		pthread_mutex_unlock(&hctx->gamelock);
-		if (ret == -1)
-			return -1;
-	}
-
-	/* testing */
-	char fentest[FEN_BUFSIZE];
-	pthread_mutex_lock(&hctx->gamelock);
-	game_get_fen(fentest);
-	pthread_mutex_unlock(&hctx->gamelock);
-	printf("%s\n", fentest);
-
-	return 0;
-}
-static int apply_move(sqid f[2])
-{
-	piece_t piece, prompiece;
-	int err = move(selsquare, f, &piece, &prompiece);
-	if (err == -1) {
-		SYSERR();
-		gfxh_cleanup();
-		pthread_exit(NULL);
-	} else if (err == 1 || err == 2) {
-		return 1;
-	}
-
-	long tmove = measure_move_time(ginfo.tiself.movestart);
-	long tstamp = measure_timestamp();
-
-	union gfxh_event_t emove;
-	memset(&emove, 0, sizeof(emove));
-	emove.playmove.type = GFXH_EVENT_PLAYMOVE;
-	emove.playmove.piece = piece;
-	memcpy(emove.playmove.from, selsquare, sizeof(emove.playmove.from));
-	memcpy(emove.playmove.to, f, sizeof(emove.playmove.to));
-	emove.playmove.prompiece = prompiece;
-	emove.playmove.tmove = tmove;
-	emove.playmove.tstamp = tstamp;
-	err = send_msg(&emove);
-	if (err == -1) {
-		SYSERR();
-		gfxh_cleanup();
-		pthread_exit(NULL);
+		assert(ret == 0);
 	}
 
 	/* get updates */
@@ -595,43 +572,17 @@ static int apply_move(sqid f[2])
 		game_get_updates(nlastply - 1, moveupdates + nupdates, 0);
 	pthread_mutex_unlock(&hctx->gamelock);
 
-	/* let time run only after the first move by white */
-	long deduction = tmove;
-	pthread_mutex_lock(&hctx->gamelock);
-	int nmove = game_get_move_number();
-	pthread_mutex_unlock(&hctx->gamelock);
-	if (nmove == 0 && ginfo.status == STATUS_MOVING_WHITE) {
-		deduction = 0;
-	}
-
 	/* update status */
 	status_t status = ginfo.status;
 	pthread_mutex_lock(&hctx->gamelock);
 	game_get_status(&status);
 	pthread_mutex_unlock(&hctx->gamelock);
 
-	/* communicate status */
-	union gfxh_event_t estat;
-	memset(&estat, 0, sizeof(estat));
-	estat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
-	estat.statuschange.status = status;
-	err = send_msg(&estat);
-	if (err == -1) {
-		SYSERR();
-		gfxh_cleanup();
-		pthread_exit(NULL);
-	}
-
 	/* play sound */
-	char *fname;
 	pthread_mutex_lock(&hctx->gamelock);
 	int capture = game_last_ply_was_capture();
 	pthread_mutex_unlock(&hctx->gamelock);
-	if (capture) {
-		fname = SOUND_CAPTURE_FNAME;
-	} else {
-		fname = SOUND_MOVE_FNAME;
-	}
+	char *fname = capture ? SOUND_CAPTURE_FNAME : SOUND_MOVE_FNAME;
 
 	union audioh_event_t esound;
 	memset(&esound, 0, sizeof(esound));
@@ -645,10 +596,16 @@ static int apply_move(sqid f[2])
 	}
 
 	/* show status */
+	if (oppmove) {
+		ginfo.tiopp.total = ginfo.tiopp.subtotal - deduction;
+		ginfo.tiopp.subtotal = ginfo.tiopp.total;
+		ginfo.tiself.movestart = ginfo.tiopp.movestart + tmove;
+	} else {
+		ginfo.tiself.total = ginfo.tiself.subtotal - deduction;
+		ginfo.tiself.subtotal = ginfo.tiself.total;
+		ginfo.tiopp.movestart = ginfo.tiself.movestart + tmove;
+	}
 	ginfo.status = status;
-	ginfo.tiself.total = ginfo.tiself.subtotal - deduction;
-	ginfo.tiself.subtotal = ginfo.tiself.total;
-	ginfo.tiopp.movestart = ginfo.tiself.movestart + tmove;
 	show_status(ginfo);
 
 	time_status_updates_num = 0;
@@ -728,7 +685,7 @@ static void show()
 	pthread_mutex_lock(&hctx->xlock);
 	draw_record();
 	pthread_mutex_unlock(&hctx->xlock);
-	for (int k = UPDATES_NUM_MAX - 1; k >= 0; --k) {
+	for (int k = MOVEUPDATES_SIZE - 1; k >= 0; --k) {
 		if (moveupdates[k][0] == -1)
 			continue;
 
@@ -901,10 +858,46 @@ static void handle_touch(struct gfxh_event_touch *e)
 				selectf(f);
 		}
 	} else if (selsquare[0] != -1) {
-		int err = apply_move(f);
-		unselectf();
-		if (err == 1)
+		long tmove = measure_move_time(ginfo.tiself.movestart);
+		long tstamp = measure_timestamp();
+
+		piece_t piece;
+		piece_t prompiece = PIECE_NONE;
+		int err = apply_move(selsquare, f, &piece, &prompiece, tmove, 0);
+		if (err == 1) {
+			unselectf();
 			return;
+		}
+
+		union gfxh_event_t emove;
+		memset(&emove, 0, sizeof(emove));
+		emove.playmove.type = GFXH_EVENT_PLAYMOVE;
+		emove.playmove.piece = piece;
+		memcpy(emove.playmove.from, selsquare, sizeof(emove.playmove.from));
+		memcpy(emove.playmove.to, f, sizeof(emove.playmove.to));
+		emove.playmove.prompiece = prompiece;
+		emove.playmove.tmove = tmove;
+		emove.playmove.tstamp = tstamp;
+		err = send_msg(&emove);
+		if (err == -1) {
+			SYSERR();
+			gfxh_cleanup();
+			pthread_exit(NULL);
+		}
+
+		/* communicate status */
+		union gfxh_event_t estat;
+		memset(&estat, 0, sizeof(estat));
+		estat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+		estat.statuschange.status = ginfo.status;
+		err = send_msg(&estat);
+		if (err == -1) {
+			SYSERR();
+			gfxh_cleanup();
+			pthread_exit(NULL);
+		}
+
+		unselectf();
 		show();
 	}
 }
@@ -917,52 +910,42 @@ static void handle_playmove(struct gfxh_event_playmove *e)
 	}
 	
 	long tstamp = measure_timestamp();
-	if ((e->tstamp - e->tstamp) > TRANSDIFF_MAX) {
+	if (tstamp - e->tstamp > TRANSDIFF_MAX) {
 		fprintf(stderr, "warning: move transmission time larger than %li\n", TRANSDIFF_MAX);
 	}
 
-	pthread_mutex_lock(&hctx->gamelock);
-	int err = game_exec_ply(e->from[0], e->from[1], e->to[0], e->to[1], e->prompiece);
-	pthread_mutex_unlock(&hctx->gamelock);
+	int err = apply_move(e->from, e->to, NULL, &e->prompiece, e->tmove, 1);
+	if (err == 1) {
+		fprintf(stderr, "%s: received illegal move", __func__);
+		gfxh_cleanup();
+		pthread_exit(NULL);
+	}
+
+	/* communicate status */
+	union gfxh_event_t estat;
+	memset(&estat, 0, sizeof(estat));
+	estat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+	estat.statuschange.status = ginfo.status;
+	err = send_msg(&estat);
 	if (err == -1) {
 		SYSERR();
 		gfxh_cleanup();
 		pthread_exit(NULL);
 	}
 
-	pthread_mutex_lock(&hctx->gamelock);
-	size_t nlastply = game_get_ply_number() - 1;
-	size_t nupdates = game_get_updates(nlastply, moveupdates, 1);
-	if (nlastply > 0)
-		game_get_updates(nlastply - 1, moveupdates + nupdates, 0);
-	pthread_mutex_unlock(&hctx->gamelock);
 	show();
-
-	/* let time run only after the first move by white */
-	long deduction = e->tmove;
-	pthread_mutex_lock(&hctx->gamelock);
-	int nmove = game_get_move_number();
-	pthread_mutex_unlock(&hctx->gamelock);
-	if (nmove == 0 && ginfo.status == STATUS_MOVING_WHITE) {
-		deduction = 0;
-	}
-
-	ginfo.tiopp.total = ginfo.tiopp.subtotal - deduction;
-	ginfo.tiopp.subtotal = ginfo.tiopp.total;
-	ginfo.tiself.movestart = ginfo.tiopp.movestart + e->tmove;
-
-	status_t status = ginfo.status;
-	pthread_mutex_lock(&hctx->gamelock);
-	game_get_status(&status);
-	pthread_mutex_unlock(&hctx->gamelock);
-
-	ginfo.status = status;
-	show_status(ginfo);
-
-	time_status_updates_num = 0;
 }
 static void handle_statuschange(struct gfxh_event_statuschange *e)
 {
+	char *soundfname = NULL;
+
+	pthread_mutex_lock(&hctx->gamelock);
+	color_t activecolor = game_get_active_color();
+	pthread_mutex_unlock(&hctx->gamelock);
+
+	struct timeinfo_t tiwhite = ginfo.selfcolor == COLOR_WHITE ? ginfo.tiself : ginfo.tiopp;
+	struct timeinfo_t tiblack = ginfo.selfcolor == COLOR_BLACK ?  ginfo.tiself : ginfo.tiopp;
+
 	switch (e->status) {
 	case STATUS_MOVING_WHITE:
 	case STATUS_MOVING_BLACK:
@@ -973,37 +956,63 @@ static void handle_statuschange(struct gfxh_event_statuschange *e)
 	case STATUS_DRAW_STALEMATE:
 	case STATUS_DRAW_REPETITION:
 	case STATUS_DRAW_FIFTY_MOVES:
-		if (e->status != ginfo.status)
-			goto err_false_claim;
+		soundfname = SOUND_GAME_DECIDED_FNAME;
 		break;
 	case STATUS_TIMEOUT_WHITE:
-	case STATUS_TIMEOUT_BLACK:
-	case STATUS_DRAW_MATERIAL_VS_TIMEOUT:
-		pthread_mutex_lock(&hctx->gamelock);
-		int isplaying = game_get_active_color() == ginfo.selfcolor;
-		pthread_mutex_unlock(&hctx->gamelock);
-		if (isplaying)
+		if (activecolor != COLOR_WHITE)
 			goto err_false_claim;
 
-		if ((ginfo.status == STATUS_MOVING_WHITE || ginfo.status == STATUS_MOVING_BLACK)
-				&& labs(ginfo.tiopp.total) <= TIMEOUTDIFF_MAX) {
+		if (ginfo.status == STATUS_MOVING_WHITE && labs(tiwhite.total) <= TIMEOUTDIFF_MAX)
 			ginfo.status = e->status;
-			show_status(ginfo);
-			break;
+
+		soundfname = SOUND_GAME_DECIDED_FNAME;
+		break;
+	case STATUS_TIMEOUT_BLACK:
+		if (activecolor != COLOR_BLACK)
+			goto err_false_claim;
+
+		if (ginfo.status == STATUS_MOVING_BLACK && labs(tiblack.total) <= TIMEOUTDIFF_MAX)
+			ginfo.status = e->status;
+
+		soundfname = SOUND_GAME_DECIDED_FNAME;
+		break;
+	case STATUS_DRAW_MATERIAL_VS_TIMEOUT:
+		if (ginfo.status == STATUS_MOVING_WHITE
+				&& labs(tiwhite.total) <= TIMEOUTDIFF_MAX) {
+			ginfo.status = e->status;
+		} else if (ginfo.status == STATUS_MOVING_BLACK
+				&& labs(tiblack.total) <= TIMEOUTDIFF_MAX) {
+			ginfo.status = e->status;
 		}
 
-		if (e->status != ginfo.status)
-			goto err_false_claim;
-
+		soundfname = SOUND_GAME_DECIDED_FNAME;
 		break;
 	case STATUS_SURRENDER_WHITE:
 	case STATUS_SURRENDER_BLACK:
 		ginfo.status = e->status;
-		show_status(ginfo);
+		soundfname = SOUND_GAME_DECIDED_FNAME;
+		break;
 	default:
 		assert(0);
 	}
-	assert(e->status == ginfo.status);
+	if (e->status != ginfo.status)
+		goto err_false_claim;
+
+	show_status(ginfo);
+
+	if (soundfname) {
+		union audioh_event_t esound;
+		memset(&esound, 0, sizeof(esound));
+		esound.playsound.type = AUDIOH_EVENT_PLAYSOUND;
+		esound.playsound.fname = soundfname;
+		int n = hwrite(hctx->audioh.pevent[1], &esound, sizeof(esound));
+		if (n == -1) {
+			SYSERR();
+			gfxh_cleanup();
+			pthread_exit(NULL);
+		}
+	}
+
 	return;
 
 err_false_claim:
@@ -1108,13 +1117,6 @@ static void gfxh_setup(void)
 		SYSERR();
 		goto cleanup_err;
 	}
-
-	/* testing */
-	char fentest[FEN_BUFSIZE];
-	pthread_mutex_lock(&hctx->gamelock);
-	game_get_fen(fentest);
-	pthread_mutex_unlock(&hctx->gamelock);
-	printf("%s\n", fentest);
 
 	ginfo.tiself.subtotal = ginfo.time;
 	ginfo.tiself.movestart = ginfo.tstart;
@@ -1289,8 +1291,8 @@ void init_communication_server(const char* node, const char *port, color_t color
 	close(fsock);
 
 	/* internally -> monotonic time, send to other client -> time both agree on: real time */
-	long tstartreal;
-	measure_game_start(&tstartreal, &ginfo.tstart);
+	long tstartreal, tstart;
+	measure_game_start(&tstartreal, &tstart);
 
 	union gfxh_event_t e;
 	memset(&e, 0, sizeof(e));
@@ -1307,6 +1309,7 @@ void init_communication_server(const char* node, const char *port, color_t color
 
 	ginfo.selfcolor = color;
 	ginfo.time = gametime;
+	ginfo.tstart = tstart;
 }
 void init_communication_client(const char *node, const char *port)
 {
