@@ -133,7 +133,7 @@ char *parse_move(const char *s, piece_t *piece,
 	const char *c = s;
 	piece_t p = PIECE_NONE;
 	for (int i = 0; i < STRLEN(piece_symbols); ++i) {
-		if (*c == piece_symbols[i]) {
+		if (*c == toupper(piece_symbols[i])) {
 			p = PIECE_BY_IDX(i);
 			++c;
 			break;
@@ -171,7 +171,7 @@ char *parse_move(const char *s, piece_t *piece,
 	/* get prompiece */
 	p = PIECE_NONE;
 	for (int i = PIECE_IDX(PIECE_QUEEN); i <= PIECE_IDX(PIECE_KNIGHT); ++i) {
-		if (*c == piece_symbols[i]) {
+		if (*c == toupper(piece_symbols[i])) {
 			p = PIECE_BY_IDX(i);
 			++c;
 			break;
