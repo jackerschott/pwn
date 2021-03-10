@@ -27,12 +27,16 @@ TESTNAMES = notationtest gametest
 SOUNDNAMES = move.mp3 capture.mp3 lowtime.mp3 gamedecided.mp3
 
 $(BINNAME): $(BUILDDIR)
-	$(MAKE) -C src ROOTDIR=..
+	@printf '\e[1m%s\e[m\n' 'cd src'
+	@$(MAKE) -C src --no-print-directory ROOTDIR=..
+	@printf '\e[1m%s\e[m\n' 'cd ..'
 
 test: $(TESTNAMES)
 
 $(TESTNAMES): $(BUILDDIR) $(BINNAME) 
-	$(MAKE) -C test/$@ ROOTDIR=../..
+	@printf '\e[1m%s\e[m\n' "cd test/$@"
+	@$(MAKE) -C test/$@ --no-print-directory ROOTDIR=../..
+	@printf '\e[1m%s\e[m\n' 'cd ../..'
 
 $(BUILDDIR):
 	mkdir -p $@
