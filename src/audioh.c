@@ -19,6 +19,7 @@
 
 #include "audioh.h"
 
+#define AUDIOH_EVENT_RESPONSE_TIME 10000
 
 static struct handler_context_t *hctx;
 static int fevent;
@@ -97,6 +98,7 @@ static void audioh_run(void)
 			goto cleanup_err;
 		}
 
+
 		if (pfd.revents) {
 			n = hread(fevent, &e, sizeof(e));
 			if (n == -1) {
@@ -113,6 +115,8 @@ static void audioh_run(void)
 				fprintf(stderr, "%s: received unexpected event\n", __func__);
 				goto cleanup_err;
 			}
+		} else {
+			usleep(AUDIOH_EVENT_RESPONSE_TIME);
 		}
 	}
 	return;

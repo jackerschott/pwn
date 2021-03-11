@@ -3,9 +3,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "util.h"
+
+void print_timestamp()
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	long t = ts.tv_sec * 1000L * 1000L * 1000L + ts.tv_nsec;
+	printf("t = %li\n", t);
+}
 
 int hread(int fd, void *buf, size_t size)
 {
@@ -49,6 +58,8 @@ int hrecv(int fd, char *buf, size_t size)
 	char *b = buf;
 	while (sz > 0) {
 		size_t n = recv(fd, b, sz, 0);
+		print_timestamp();
+		printf("n = %lu\n", n);
 		if (n == -1) {
 			if (errno == EINTR)
 				continue;
@@ -62,6 +73,7 @@ int hrecv(int fd, char *buf, size_t size)
 		if (b[n - 1] == '\n') {
 			b[n - 1] = '\0';
 			printf("[received] %s\n", b);
+			printf("\n");
 			return 0;
 		}
 
@@ -77,7 +89,9 @@ int hrecv(int fd, char *buf, size_t size)
 		//	b = buf + sz;
 		//}
 	}
-	printf("[received] %s\n", b);
+	buf[70] = '\0';
+	printf("[received] %s\n", buf);
+	printf("\n");
 	return -3;
 }
 int hsend(int fd, char *buf)
@@ -88,6 +102,8 @@ int hsend(int fd, char *buf)
 	char *b = buf;
 	while (size > 0) {
 		size_t n = send(fd, b, size, 0);
+		print_timestamp();
+		printf("n = %lu\n", n);
 		if (n == -1) {
 			if (errno == EINTR)
 				continue;
@@ -102,5 +118,6 @@ int hsend(int fd, char *buf)
 	char *c = strchr(buf, '\n');
 	*c = '\0';
 	printf("[send] %s\n", buf);
+	printf("\n");
 	return 0;
 }

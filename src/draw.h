@@ -20,6 +20,7 @@
 #define DRAW_H
 
 #include "pwn.h"
+#include "game.h"
 
 enum shade_t {
 	SHADE_LIGHT = 0,

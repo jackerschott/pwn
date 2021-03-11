@@ -26,6 +26,16 @@
 
 #include "notation.h"
 
+static const char *piece_names[] = {
+	"king",
+	"queen",
+	"rook",
+	"bishop",
+	"knight",
+	"pawn",
+};
+static const char *piece_symbols = "kqrbnp";
+
 #define DIVROUND(a, b) (((a) + ((b) - 1)) / (b))
 
 size_t format_move(piece_t piece, sqid from[2], sqid to[2], piece_t prompiece, char *str)

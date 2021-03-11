@@ -42,6 +42,8 @@
 
 #include "gfxh.h"
 
+#define GFXH_EVENT_RESPONSE_TIME 10000
+
 int fopp;
 
 static struct handler_context_t *hctx;
@@ -102,6 +104,65 @@ static Atom atoms[ATOM_COUNT];
 #define TITLE_MAXLEN (TINTERVAL_COARSE_MAXLEN + STRLEN(" - ") 	\
 		+ TINTERVAL_COARSE_MAXLEN 			\
 		+ STATMSG_TEXTS_MAXLEN)
+
+#define STATMSG_NAME_MAXLEN 14
+static const char *statmsg_names[] = {
+	"movingwhite",
+	"movingblack",
+	"checkmatewhite",
+	"checkmateblack",
+	"drawmaterial",
+	"drawstalemate",
+	"drawrepitition",
+	"drawfiftymove",
+	"timeoutwhite",
+	"timeoutblack",
+	"drawmaterialvstimeout",
+	"surrenderwhite",
+	"surrenderblack",
+};
+#define STATMSG_TEXTS_MAXLEN 40
+static const char *statmsg_texts[] = {
+	"It is White to move",
+	"It is Black to move",
+	"Black won by checkmate",
+	"White won by checkmate",
+	"Draw by insufficient material",
+	"Draw by stalemate",
+	"Draw by threefold repetition",
+	"Draw by fifty move rule",
+	"Black won by timeout",
+	"White won by timeout",
+	"Draw by timeout vs insufficient material",
+	"Black won by surrender",
+	"White won by surrender",
+};
+
+struct msg_init {
+	int type;
+	color_t color;
+	long gametime;
+	long tstamp;
+};
+struct msg_playmove {
+	int type;
+	piece_t piece;
+	sqid from[2];
+	sqid to[2];
+	piece_t prompiece;
+	long tmove;
+	long tstamp;
+};
+struct msg_statuschange {
+	int type;
+	status_t status;
+};
+union msg_t {
+	int type;
+	struct msg_init init;
+	struct msg_playmove playmove;
+	struct msg_statuschange statuschange;
+};
 
 /* time and game status management */
 #define TIME_STATUS_UPDATE_INTERVAL SECOND
@@ -168,7 +229,7 @@ static long measure_timestamp()
 	return ts.tv_sec * SECOND + ts.tv_nsec;
 }
 
-static void format_initmsg(struct gfxh_event_init *e, char *str)
+static void format_initmsg(struct msg_init *e, char *str)
 {
 	char *c = str;
 	strncpy(c, INITMSG_PREFIX " ", STRLEN(INITMSG_PREFIX " "));
@@ -196,7 +257,7 @@ static void format_initmsg(struct gfxh_event_init *e, char *str)
 
 	*c = '\0';
 }
-static void format_movemsg(struct gfxh_event_playmove *e, char *str)
+static void format_movemsg(struct msg_playmove *e, char *str)
 {
 	size_t l;
 	char *c = str;
@@ -220,7 +281,7 @@ static void format_movemsg(struct gfxh_event_playmove *e, char *str)
 
 	*c = '\0';
 }
-static void format_statusmsg(struct gfxh_event_statuschange *e, char *str)
+static void format_statusmsg(struct msg_statuschange *e, char *str)
 {
 	char *c = str;
 	strncpy(c, STATMSG_PREFIX " ", STRLEN(STATMSG_PREFIX " "));
@@ -228,7 +289,7 @@ static void format_statusmsg(struct gfxh_event_statuschange *e, char *str)
 
 	strcpy(c, statmsg_names[(int)e->status]);
 }
-static int parse_initmsg(const char *str, struct gfxh_event_init *e)
+static int parse_initmsg(const char *str, struct msg_init *e)
 {
 	e->type = GFXH_EVENT_INIT;
 
@@ -262,7 +323,7 @@ static int parse_initmsg(const char *str, struct gfxh_event_init *e)
 
 	return 0;
 }
-static int parse_movemsg(const char *str, struct gfxh_event_playmove *e)
+static int parse_movemsg(const char *str, struct msg_playmove *e)
 {
 	e->type = GFXH_EVENT_PLAYMOVE;
 
@@ -291,7 +352,7 @@ static int parse_movemsg(const char *str, struct gfxh_event_playmove *e)
 
 	return 0;
 }
-static int parse_statusmsg(const char *str, struct gfxh_event_statuschange *e)
+static int parse_statusmsg(const char *str, struct msg_statuschange *e)
 {
 	e->type = GFXH_EVENT_STATUSCHANGE;
 
@@ -315,7 +376,7 @@ static int parse_statusmsg(const char *str, struct gfxh_event_statuschange *e)
 
 	return 0;
 }
-static void format_msg(union gfxh_event_t *e, char *str)
+static void format_msg(union msg_t *e, char *str)
 {
 	switch (e->type) {
 	case GFXH_EVENT_INIT:
@@ -331,7 +392,7 @@ static void format_msg(union gfxh_event_t *e, char *str)
 		assert(0);
 	}
 }
-static int parse_msg(const char *str, union gfxh_event_t *e)
+static int parse_msg(const char *str, union msg_t *e)
 {
 	if (strncmp(str, INITMSG_PREFIX, STRLEN(INITMSG_PREFIX)) == 0) {
 		return parse_initmsg(str, &e->init);
@@ -342,7 +403,7 @@ static int parse_msg(const char *str, union gfxh_event_t *e)
 	}
 	assert(0);
 }
-static int send_msg(union gfxh_event_t *e)
+static int send_msg(union msg_t *e)
 {
 	char buf[MSG_MAXLEN + 1];
 	format_msg(e, buf);
@@ -353,7 +414,7 @@ static int send_msg(union gfxh_event_t *e)
 
 	return 0;
 }
-static int recv_msg(union gfxh_event_t *e)
+static int recv_msg(union msg_t *e)
 {
 	char buf[MSG_MAXLEN + 1];
 	int err = hrecv(fopp, buf, sizeof(buf));
@@ -368,13 +429,13 @@ static int recv_msg(union gfxh_event_t *e)
 
 static int send_status(status_t status)
 {
-	union gfxh_event_t e;
-	memset(&e, 0, sizeof(e));
-	e.statuschange.type = GFXH_EVENT_STATUSCHANGE;
-	e.statuschange.status = status;
+	union msg_t m;
+	memset(&m, 0, sizeof(m));
+	m.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+	m.statuschange.status = status;
 
 	char buf[STATMSG_MAXLEN + 1];
-	format_statusmsg(&e.statuschange, buf);
+	format_statusmsg(&m.statuschange, buf);
 
 	int err = hsend(fopp, buf);
 	if (err != 0)
@@ -382,7 +443,7 @@ static int send_status(status_t status)
 
 	return 0;
 }
-static int recv_status(struct gfxh_event_statuschange *e)
+static int recv_status(struct msg_statuschange *e)
 {
 	const size_t bufsize = STATMSG_MAXLEN + 1;
 	char buf[bufsize];
@@ -863,16 +924,16 @@ static void handle_touch(struct gfxh_event_touch *e)
 			return;
 		}
 
-		union gfxh_event_t emove;
-		memset(&emove, 0, sizeof(emove));
-		emove.playmove.type = GFXH_EVENT_PLAYMOVE;
-		emove.playmove.piece = piece;
-		memcpy(emove.playmove.from, selsquare, sizeof(emove.playmove.from));
-		memcpy(emove.playmove.to, f, sizeof(emove.playmove.to));
-		emove.playmove.prompiece = prompiece;
-		emove.playmove.tmove = tmove;
-		emove.playmove.tstamp = tstamp;
-		err = send_msg(&emove);
+		union msg_t mmove;
+		memset(&mmove, 0, sizeof(mmove));
+		mmove.playmove.type = GFXH_EVENT_PLAYMOVE;
+		mmove.playmove.piece = piece;
+		memcpy(mmove.playmove.from, selsquare, sizeof(mmove.playmove.from));
+		memcpy(mmove.playmove.to, f, sizeof(mmove.playmove.to));
+		mmove.playmove.prompiece = prompiece;
+		mmove.playmove.tmove = tmove;
+		mmove.playmove.tstamp = tstamp;
+		err = send_msg(&mmove);
 		if (err == -1) {
 			SYSERR();
 			gfxh_cleanup();
@@ -880,11 +941,11 @@ static void handle_touch(struct gfxh_event_touch *e)
 		}
 
 		/* communicate status */
-		union gfxh_event_t estat;
-		memset(&estat, 0, sizeof(estat));
-		estat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
-		estat.statuschange.status = ginfo.status;
-		err = send_msg(&estat);
+		union msg_t mstat;
+		memset(&mstat, 0, sizeof(mstat));
+		mstat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+		mstat.statuschange.status = ginfo.status;
+		err = send_msg(&mstat);
 		if (err == -1) {
 			SYSERR();
 			gfxh_cleanup();
@@ -895,7 +956,7 @@ static void handle_touch(struct gfxh_event_touch *e)
 		show();
 	}
 }
-static void handle_playmove(struct gfxh_event_playmove *e)
+static void handle_playmove(struct msg_playmove *e)
 {
 	if (ginfo.status != STATUS_MOVING_WHITE && ginfo.status != STATUS_MOVING_BLACK) {
 		fprintf(stderr, "%s: received move in state %s", __func__, statmsg_names[(int)ginfo.status]);
@@ -916,11 +977,11 @@ static void handle_playmove(struct gfxh_event_playmove *e)
 	}
 
 	/* communicate status */
-	union gfxh_event_t estat;
-	memset(&estat, 0, sizeof(estat));
-	estat.statuschange.type = GFXH_EVENT_STATUSCHANGE;
-	estat.statuschange.status = ginfo.status;
-	err = send_msg(&estat);
+	union msg_t m;
+	memset(&m, 0, sizeof(m));
+	m.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+	m.statuschange.status = ginfo.status;
+	err = send_msg(&m);
 	if (err == -1) {
 		SYSERR();
 		gfxh_cleanup();
@@ -929,7 +990,7 @@ static void handle_playmove(struct gfxh_event_playmove *e)
 
 	show();
 }
-static void handle_statuschange(struct gfxh_event_statuschange *e)
+static void handle_statuschange(struct msg_statuschange *e)
 {
 	char *soundfname = NULL;
 
@@ -1051,11 +1112,11 @@ static void handle_updatetime(void)
 		pthread_mutex_unlock(&hctx->gamelock);
 
 		/* communicate status */
-		union gfxh_event_t e;
-		memset(&e, 0, sizeof(e));
-		e.statuschange.type = GFXH_EVENT_STATUSCHANGE;
-		e.statuschange.status = status;
-		int err = send_msg(&e);
+		union msg_t m;
+		memset(&m, 0, sizeof(m));
+		m.statuschange.type = GFXH_EVENT_STATUSCHANGE;
+		m.statuschange.status = status;
+		int err = send_msg(&m);
 		if (err == -1) {
 			SYSERR();
 			gfxh_cleanup();
@@ -1134,6 +1195,9 @@ static void gfxh_run(void)
 {
 	union gfxh_event_t e;
 	memset(&e, 0, sizeof(e));
+
+	union msg_t m;
+	memset(&m, 0, sizeof(m));
 	while (1) {
 		int n = poll(pfds, ARRNUM(pfds), 0);
 		if (n == -1) {
@@ -1141,9 +1205,7 @@ static void gfxh_run(void)
 			goto cleanup_err;
 		}
 
-		if (ginfo.time && n == 0) {
-			handle_updatetime();
-		} else if (pfds[0].revents) {
+		if (pfds[0].revents) {
 			n = hread(fevent, &e, sizeof(e));
 			if (n == -1) {
 				SYSERR();
@@ -1167,7 +1229,7 @@ static void gfxh_run(void)
 				goto cleanup_err;
 			}
 		} else if (pfds[1].revents) {
-			n = recv_msg(&e);
+			n = recv_msg(&m);
 			if (n == -1) {
 				SYSERR();
 				goto cleanup_err;
@@ -1181,17 +1243,21 @@ static void gfxh_run(void)
 				break;
 			}
 
-			switch (e.type) {
+			switch (m.type) {
 			case GFXH_EVENT_PLAYMOVE:
-				handle_playmove(&e.playmove);
+				handle_playmove(&m.playmove);
 				break;
 			case GFXH_EVENT_STATUSCHANGE:
-				handle_statuschange(&e.statuschange);
+				handle_statuschange(&m.statuschange);
 				break;
 			default:
 				fprintf(stderr, "%s: received unexpected message\n", __func__);
 				goto cleanup_err;
 			}
+		} else {
+			if (ginfo.time)
+				handle_updatetime();
+			usleep(GFXH_EVENT_RESPONSE_TIME);
 		}
 	}
 	return;
@@ -1287,13 +1353,13 @@ void init_communication_server(const char* node, const char *port, color_t color
 	long tstartreal, tstart;
 	measure_game_start(&tstartreal, &tstart);
 
-	union gfxh_event_t e;
-	memset(&e, 0, sizeof(e));
-	e.init.type = GFXH_EVENT_INIT;
-	e.init.color = color;
-	e.init.gametime = gametime;
-	e.init.tstamp = tstartreal;
-	err = send_msg(&e);
+	union msg_t m;
+	memset(&m, 0, sizeof(m));
+	m.init.type = GFXH_EVENT_INIT;
+	m.init.color = color;
+	m.init.gametime = gametime;
+	m.init.tstamp = tstartreal;
+	err = send_msg(&m);
 	if (err == -1) {
 		SYSERR();
 		close(fopp);
@@ -1332,8 +1398,8 @@ void init_communication_client(const char *node, const char *port)
 		exit(-1);
 	}
 
-	union gfxh_event_t e;
-	err = recv_msg(&e);
+	union msg_t m;
+	err = recv_msg(&m);
 	if (err == -1) {
 		SYSERR();
 		close(fopp);
@@ -1351,21 +1417,21 @@ void init_communication_client(const char *node, const char *port)
 		close(fopp);
 		exit(-1);
 	}
-	if (e.type != GFXH_EVENT_INIT) {
+	if (m.type != GFXH_EVENT_INIT) {
 		fprintf(stderr, "%s: expected init message", __func__);
 		close(fopp);
 		exit(-1);
 	}
 
 	long tstart;
-	err = get_game_start_mono(e.init.tstamp, &tstart);
+	err = get_game_start_mono(m.init.tstamp, &tstart);
 	if (err == 1) {
 		fprintf(stderr, "%s: server and client don't agree on start time\n", __func__);
 		close(fopp);
 		exit(-1);
 	}
 
-	ginfo.selfcolor = e.init.color;
-	ginfo.time = e.init.gametime;
+	ginfo.selfcolor = m.init.color;
+	ginfo.time = m.init.gametime;
 	ginfo.tstart = tstart;
 }

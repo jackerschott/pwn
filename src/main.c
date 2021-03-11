@@ -39,6 +39,8 @@
 #include "pwn.h"
 #include "util.h"
 
+#define WINEVENT_RESPONSE_TIME 10000
+
 #define GAMETIME_MAX (10L * HOUR)
 #define MOVEINC_MAX MINUTE
 
@@ -200,31 +202,6 @@ static void on_keypress(XKeyEvent *e)
 		pthread_mutex_lock(&hctx->mainlock);
 		hctx->terminate = 1;
 		pthread_mutex_unlock(&hctx->mainlock);
-	}
-}
-
-/* debug */
-static void print_options(void)
-{
-	printf("options\n");
-	if (options.color == COLOR_WHITE) {
-		printf("\tcolor: white\n");
-	} else if (options.color == COLOR_BLACK) {
-		printf("\tcolor: black\n");
-	}
-
-	printf("\tnode: %s\n", options.node);
-	printf("\tport: %s\n", options.port);
-
-	int h = options.gametime / (60L * 60L * SECOND);
-	int m = options.gametime / (60L * SECOND) - h * 60L;
-	int i = options.moveinc;
-	printf("\ttime: %i:%i+%i\n", h, m, i);
-
-	if (options.flags & OPTION_IS_SERVER) {
-		printf("\tis server\n");
-	} else if (options.flags & OPTION_NO_OPPONENT) {
-		printf("\tno opponent\n");
 	}
 }
 
@@ -520,12 +497,15 @@ static void run(void)
 		term = hctx->terminate;
 		pthread_mutex_unlock(&hctx->mainlock);
 
+
 		/* Prevent blocking of XNextEvent inside mutex lock */
 		pthread_mutex_lock(&hctx->xlock);
 		int n = XPending(dpy);
 		pthread_mutex_unlock(&hctx->xlock);
-		if (n == 0)
+		if (n == 0) {
+			usleep(WINEVENT_RESPONSE_TIME);
 			continue;
+		}
 
 		pthread_mutex_lock(&hctx->xlock);
 		XNextEvent(dpy, &e);
@@ -559,15 +539,6 @@ int main(int argc, char *argv[])
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = 0;
 	sigaction(SIGPIPE, &sa, NULL);
-
-	//if (argc > 1) {
-	//	if (game_load_board(argv[1])) {
-	//		perror("game_load_board");
-	//		exit(-1);
-	//	}
-	//} else {
-	//	game_init_board(player_color);
-	//}
 
 	setup();
 	run();

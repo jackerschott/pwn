@@ -20,8 +20,14 @@
 #define GFXH_H
 
 #include "pwn.h"
+#include "game.h"
 
 #define GFXH_STACKSIZE (4096 * 64)
+
+enum {
+	TOUCH_PRESS = 0,
+	TOUCH_RELEASE = 1,
+};
 
 enum {
 	GFXH_EVENT_CLIENTMESSAGE,
@@ -31,10 +37,6 @@ enum {
 	GFXH_EVENT_INIT,
 	GFXH_EVENT_PLAYMOVE,
 	GFXH_EVENT_STATUSCHANGE,
-};
-enum {
-	TOUCH_PRESS = 0,
-	TOUCH_RELEASE = 1,
 };
 struct gfxh_event_clientmessage {
 	int type;
@@ -54,33 +56,11 @@ struct gfxh_event_touch {
 	int y;
 	int flags;
 };
-struct gfxh_event_init {
-	int type;
-	color_t color;
-	long gametime;
-	long tstamp;
-};
-struct gfxh_event_playmove {
-	int type;
-	piece_t piece;
-	sqid from[2];
-	sqid to[2];
-	piece_t prompiece;
-	long tmove;
-	long tstamp;
-};
-struct gfxh_event_statuschange {
-	int type;
-	status_t status;
-};
 union gfxh_event_t {
 	int type;
 	struct gfxh_event_clientmessage clientmessage;
 	struct gfxh_event_redraw redraw;
 	struct gfxh_event_touch touch;
-	struct gfxh_event_init init;
-	struct gfxh_event_playmove playmove;
-	struct gfxh_event_statuschange statuschange;
 };
 
 enum {

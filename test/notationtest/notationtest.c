@@ -36,11 +36,11 @@ void test_timeinterval(long dt) {
 }
 
 void test_move() {
-	for (int i = 0; i < NUM_PIECES * NF * NF * NF * NF * (NUM_PIECES - 2); ++i) {
+	for (int i = 0; i < PIECES_NUM * NF * NF * NF * NF * (PIECES_NUM - 2); ++i) {
 		sqid from[2], to[2];
-		piece_t p = 2 * (i % NUM_PIECES) + 2;
+		piece_t p = 2 * (i % PIECES_NUM) + 2;
 
-		int j = (i / NUM_PIECES);
+		int j = (i / PIECES_NUM);
 		int k = (j / NF / NF);
 		from[0] = j % NF;
 		from[1] = (j / NF) % NF;

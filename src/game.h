@@ -21,11 +21,59 @@
 
 #include "pwn.h"
 
-#define UPDATES_NUM_MAX 4
+#define NF 8
+#define PIECES_NUM 6
+#define COLORS_NUM 2
+
+#define OPP_COLOR(c) ((c) ^ COLORMASK)
+#define PIECE_IDX(p) ((p) / 2 - 1)
+#define PIECE_BY_IDX(i) (2 * (i) + 2)
+
+#define COLORMASK 0b0001
+enum color_t {
+	COLOR_WHITE = 0,
+	COLOR_BLACK = 1,
+};
+#define PIECEMASK 0b1110
+enum piece_t {
+	PIECE_NONE = 0,
+	PIECE_KING = 2,
+	PIECE_QUEEN = 4,
+	PIECE_ROOK = 6,
+	PIECE_BISHOP = 8,
+	PIECE_KNIGHT = 10,
+	PIECE_PAWN = 12,
+};
+#define CASTLERIGHT_QUEENSIDE 	(1 << 0)
+#define CASTLERIGHT_KINGSIDE 	(1 << 1)
+
+enum status_t {
+	STATUS_MOVING_WHITE,
+	STATUS_MOVING_BLACK,
+	STATUS_CHECKMATE_WHITE,
+	STATUS_CHECKMATE_BLACK,
+	STATUS_DRAW_MATERIAL,
+	STATUS_DRAW_STALEMATE,
+	STATUS_DRAW_REPETITION,
+	STATUS_DRAW_FIFTY_MOVES,
+	STATUS_TIMEOUT_WHITE,
+	STATUS_TIMEOUT_BLACK,
+	STATUS_DRAW_MATERIAL_VS_TIMEOUT,
+	STATUS_SURRENDER_WHITE,
+	STATUS_SURRENDER_BLACK,
+};
+
+typedef enum color_t color_t;
+typedef enum piece_t piece_t;
+typedef int sqid;
+typedef int squareinfo_t;
+typedef struct ply_t ply_t;
+typedef enum status_t status_t;
 
 #define STARTPOS_FEN "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
-typedef struct ply_t ply_t;
+#define UPDATES_NUM_MAX 4
+
 
 int game_init(const char *fen);
 void game_terminate(void);
