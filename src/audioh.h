@@ -1,10 +1,10 @@
 #ifndef AUDIO_H
 #define AUDIO_H
 
-#define SOUND_MOVE_FNAME 		(DATADIR "move.mp3")
-#define SOUND_CAPTURE_FNAME 		(DATADIR "capture.mp3")
-#define SOUND_GAME_DECIDED_FNAME 	(DATADIR "gamedecided.mp3")
-#define SOUND_LOW_TIME_FNAME 		(DATADIR "lowtime.mp3")
+#define SOUND_MOVE_FNAME 		(DATADIR "sounds/move.mp3")
+#define SOUND_CAPTURE_FNAME 		(DATADIR "sounds/capture.mp3")
+#define SOUND_GAME_DECIDED_FNAME 	(DATADIR "sounds/gamedecided.mp3")
+#define SOUND_LOW_TIME_FNAME 		(DATADIR "sounds/lowtime.mp3")
 
 enum {
 	AUDIOH_EVENT_PLAYSOUND,

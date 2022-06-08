@@ -85,7 +85,7 @@ static unsigned int possible_positions_nums[] = {
 	1486,
 	62379,
 	2103487,
-	89941194,
+	//89941194,
 };
 
 int main(void) {
